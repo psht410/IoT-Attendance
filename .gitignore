@@ -102,3 +102,13 @@ dist
 
 # TernJS port file
 .tern-port
+
+######
+# DB connection
+model/db.js
+
+# RFID SDK
+public/javascripts/ECOSmartIDReaderWebService.js
+
+# Android app
+public/app.apk

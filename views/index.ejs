@@ -1,0 +1,3409 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>책</title>
+
+    <!--Let browser know website is optimized for mobile-->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+    <!--Google Icon Font-->
+    <link href="http://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!--Materialize CSS-->
+    <link type="text/css" rel="stylesheet" href="stylesheets/materialize.min.css"  media="screen,projection"/>
+    <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css"> -->
+
+
+    <!--Custom CSS-->
+    <link rel='stylesheet' href='/stylesheets/style.css' />
+
+    <!-- AngularJS -->
+    <script src="//ajax.googleapis.com/ajax/libs/angularjs/1.4.8/angular.min.js"></script>
+
+    <link rel="stylesheet" href="//unpkg.com/ng-table@2.0.2/bundles/ng-table.min.css">
+    <script src="//unpkg.com/ng-table@2.0.2/bundles/ng-table.min.js"></script>
+
+    <script src="/javascripts/ECOSmartIDReaderWebService.js"></script>
+
+    <!-- Google Search Console -->
+    <meta name="google-site-verification" content="Eek9pXqE3Q6sdTNr3c_4Sq2PRGoqOg19azadYkV25Vo" />
+
+
+</head>
+
+<script>
+    // var dataitems = <%- JSON.stringify(item) %>;
+    // var data = <%- JSON.stringify(user) %>;
+    var databeacon = <%- JSON.stringify(beacon) %>;
+
+    var logined_user = "<%= logined_usernumber %>";
+    var logined_name = "<%= logined_name %>";
+    var logined_phone = "<%= logined_phone %>";
+    var is_logined = "<%= is_logined %>";
+    var is_admin = "<%= is_admin %>";
+    var logined_dep = "<%= logined_dep %>";
+
+    "use strict";
+
+    var pp;
+    var arrDays = [];
+
+    var itemcards = angular.module("ItemCards", ['ngTable']);
+    itemcards.controller("ItemCardsCtrl", function($scope, $http, $window){
+        $scope.items = <%- JSON.stringify(item) %>;
+        $scope.users = <%- JSON.stringify(user) %>;
+        $scope.beacons = <%- JSON.stringify(beacon) %>;
+        $scope.api_key = "AIzaSyCDjId6ypusRJUGCGrdJV2RZnicBtm9h1k";
+
+        $scope.logined_dep = logined_dep;
+        $scope.logined_user = logined_user;
+        $scope.logined_name = logined_name;
+        $scope.is_logined = is_logined=='true'?true:false;
+        $scope.is_admin = is_admin=='true'?true:false;
+
+        $scope.rfid_uid = "";
+
+        $scope.tabFilterType = "";
+        $scope.tabFilterOrderProp = '-regdate';
+        $scope.tabFilterOrderType = false;
+
+        $scope.viewSwitch = false;
+
+        $scope.tabFilterChange = function(filter){
+            $scope.tabFilterType = filter;
+        }
+
+        $scope.tabFilterChangeOrder = function(filter){
+            $scope.tabFilterOrderType = !$scope.tabFilterOrderType;
+            if($scope.tabFilterOrderProp != filter){
+                $scope.tabFilterOrderType = false;
+                $scope.tabFilterOrderProp = filter;
+            }
+        }
+
+        $scope.$watch('rfid_uid', function(newValue, oldValue, scope){
+            console.log("TRYING LOGIN, ", !$scope.is_logined && $("#login").attr("class").includes('open'));
+            if($('#register').attr('class').includes('open') && !$('#register_rfid').val()){
+                var tmp = (' '+newValue).slice(1);
+                $scope.rfid_uid = "";
+                console.log(tmp);
+                console.log($scope.rfid_uid);
+
+                $("#register_rfid").val(tmp);
+                $("#register_rfid_show").val(tmp);
+                $("#register_rfid_show").removeAttr("style");
+                // $("#register_progress").attr("class", "determinate");
+                $("#register_progress").remove();
+            }else if(!$scope.is_logined && $("#login").attr("class").includes('open') && !$("#register").attr("class").includes("open")){
+                console.log("LOGIN RFID: ", newValue);
+
+                var reqData = {rfid: newValue};
+
+                $.post('/login', reqData, function(res){
+                    if(!res){
+                        // login fail
+                        M.toast({html: '등록되지 않은 RFID 태그입니다.'});
+                    }
+                    else {
+                        location.replace('/');
+                    }
+                }).fail(function(res){
+                    M.toast({html: '태깅 로그인 오류, 로그 확인'});
+                    console.error('err', res);
+                });
+            }else{
+                $scope.rfid_uid = "";
+            }
+        });
+
+        $scope.$watch('viewSwitch', function(newValue, oldValue, scope){
+            if(newValue != oldValue){
+                $http({
+                    method: 'GET',
+                    url: '/getitem'
+                }).then(function ifOK(response){
+                    $scope.items = response.data;
+                }, function ifErr(response){
+                    console.error("err : ", response);
+                });
+            }
+            
+            var dayList = ['일', '월', '화', '수', '목', '금', '토'];
+            var colorList = ['#FFADAD', '#FFD6A5', '#FDFFB6', '#CAFFBF', '#9BF6FF', '#A0C4FF', '#BDB2FF', '#FFC6FF', '#FFFFFC'];
+            var log = [];
+            var color = -1;
+            angular.forEach($scope.items, function(value){
+                // 수강하는 과목이 있을 경우
+                if(value.student.indexOf($scope.logined_user)>-1){
+                    var itemId = value._id;
+                    var itemTitle = value.title;
+                    var itemManager = value.manager;
+                    var itemManagerNo = value.managerno;
+                    var itemLocation = value.location;
+                    var itemBeaconOid = value.beacon.oid;
+
+                    console.log(itemTitle);
+
+                    var attend_date;
+                    var attend_type;
+                    var attr = "";
+                    var now = new Date();
+                    now.setTime(now.getTime()+ 9*60*60*1000);
+
+                    var response;
+
+                    $.ajax({
+                        url: "/getattend/" + $scope.logined_user + '/' + itemId + '/' + itemBeaconOid,
+                        method: "GET" 
+                    }).done(function(json) {
+                        response = json;
+                    }).always(function(){
+                        color++;
+                        angular.forEach(value.days, function(day){
+                            attr = "";
+
+                            angular.forEach(response, function(t){
+                                attend_date = new Date(t.attend_date);
+                                attend_type = t.attend_type;
+
+                                var t_begin = new Date(now.getFullYear(), now.getMonth(), now.getDate()-now.getDay()+dayList.indexOf(day[0]), 9+9, -15 + 90*(day[1]-1));
+                                var t_end = new Date();
+                                t_end.setTime(t_begin.getTime()+ 75*60*1000);
+
+                                if(t_begin.getTime() < attend_date.getTime() && attend_date.getTime() < t_end.getTime()){
+                                    switch(attend_type){
+                                        case 1: attr = "아직 안감";
+                                            break;
+                                        case 2: attr = "체류중";
+                                            break;
+                                        case 3: attr = "퇴실함";
+                                            break;
+                                        case 200: attr = "지각";
+                                            break;
+                                        case 300: attr = "출튀"
+                                            break;
+                                        default: break;
+                                    }
+                                }
+                            });
+
+                            var d = dayList.indexOf(day[0]);
+                            var t = day[1];
+                            console.log("d: " + d + ", t: " + t);
+                            var html = '<div class="btn_read '+'a'+attend_type+'" onclick=window.angFoo("'+itemId+'")><h5>' + itemTitle +'</h5>' + itemLocation + '<BR>' + itemManager +'<BR>'+ attr +'</div>';
+                            $('#timetable tr:eq('+ t  +') td:eq('+ d  +')').css('background', colorList[color]);
+                            $('#timetable tr:eq('+ t  +') td:eq('+ d  +')').html(html);
+                        });
+                    });
+
+                }
+                // this.push(value);
+            }, log);
+            // console.log(log);
+        });
+
+        $window.angFoo = function(itemId){
+            $scope.getItemData(itemId);
+            $scope.$apply();
+        };
+
+        $window.setRFID = function(rfid_uid){
+            // $scope.getItemData(itemId);
+            $scope.rfid_uid = rfid_uid;
+            $scope.$apply();
+        };
+
+        $scope.getItemData = function(itemId){
+            if(!is_logined)
+                M.TapTarget.getInstance($('.tap-target')).open();
+            else {
+                $http({
+                    method: 'GET',
+                    url: '/read/' + itemId
+                }).then(function ifOK(res){
+                    $scope.readItem = res.data;
+                    M.Modal.getInstance($('#read')).open(); 
+                    // M.updateTextFields();
+                    // $('input, textarea').each(function(){this.focus();});
+                }, function ifErr(res){
+                    console.error("err : ", res);
+                });
+            }
+        };
+        
+        $scope.onEnd = function(isMultiple){
+            $('.indicators').remove();
+            $('.carousel').carousel({
+                duration: 50,
+                dist: -100,
+                // shift: 300,
+                padding: 500,
+                fullWidth: false,
+                indicators: isMultiple,
+                numVisible: 3
+            });
+            $('.collapsible').collapsible({
+                accordion: false
+            });
+        };
+
+        $scope.itemDelete = function(itemId){
+            var isOK = confirm("진짜 지워요 ?");
+
+            if(isOK){
+                    var reqData = {
+                        oid : itemId,
+                        type: "item"
+                    };
+
+                    $.ajax({
+                        type: "POST",
+                        dataType: "JSON",
+                        url: '/delete',
+                        data : reqData,
+                        success: function(res){
+                            M.Modal.getInstance($('#read')).close();
+                            $('#card_'+itemId).remove();
+                            M.toast({html: "삭제 완료"});
+                            // location.replace('/');
+                        },
+                        error: function(req, status, err){
+                            M.toast({html: '강의 삭제 오류, 로그 확인'});
+                            console.error('err', err);
+                        }
+                    });
+                }   
+        };
+
+        $scope.userDelete = function(userId){
+            if(is_admin){
+                var isOK = confirm("진짜 지웁니다 ?");
+
+                if(isOK){
+                    var reqData = {
+                        oid : userId,
+                        type: "user"
+                    };
+
+                    $.ajax({
+                        type: "POST",
+                        dataType: "JSON",
+                        url: '/delete',
+                        data : reqData,
+                        success: function(res){
+                            $('#tr_'+userId).remove();
+                            M.toast({html: "삭제 완료"});
+                        },
+                        error: function(req, status, err){
+                            M.toast({html: '유저 삭제 오류, 로그 확인'});
+                            console.error('err', err);
+                        }
+                    });
+                }
+            }
+        }
+
+        $scope.userGrant = function(userId, op){
+            var isOK;
+
+            if(op)  isOK = confirm("해당 유저를 관리자로 지정하시겠습니까 ?");
+            else isOK = confirm("해당 유저의 관리자 권한을 제거하시겠습니까 ?");
+
+            if(isOK){
+                var reqData = {
+                    uid: userId,
+                    type: op
+                };
+
+                $.ajax({
+                    type: 'POST',
+                    dataType: "JSON",
+                    url: '/grant',
+                    data: reqData,
+                    success: function(res){
+                        $http({
+                            method: 'GET',
+                            url: '/getuser'
+                        }).then(function ifOK(tres){
+                            $scope.users = tres.data;
+
+                            if(op)  M.toast({html:"관리자 지정 완료"});
+                            else    M.toast({html:"관리자 권한 제거 완료"});
+                        }, function ifErr(tres){
+                            console.error("err : ", tres);
+                        });
+                    },
+                    error: function(req, status, err){
+                        M.toast({html: '비컨 추가 오류, 로그 확인'});
+                        console.error('err', err);
+                    }
+                });
+            }
+        }
+
+        $scope.beaconDelete = function(beaconId){
+            if(is_admin){
+                var isOK = confirm("진짜 지웁니다 ?");
+
+                if (isOK){
+                    var reqData = {
+                        oid: beaconId,
+                    };
+
+                    $.ajax({
+                        type: "POST",
+                        dataType: "JSON",
+                        url: '/delbeacon',
+                        data: reqData,
+                        success: function(res){
+                            $('#tr_'+beaconId).remove();
+                            M.toast({html: "비컨 삭제 완료"});
+                        },
+                        error: function(req, status, err){
+                            M.toast({html: "비컨 삭제 오류, 로그 확인"});
+                            console.error('err', err);
+                        }
+                    });
+                }
+            }
+        }
+
+        $scope.userModOnClass = function(itemId, userOid, userId, op){
+            var reqData = {
+                        uid : userId,
+                        oid : itemId,
+                        type: op
+            };
+
+            $.ajax({
+                type: "POST",
+                dataType: "JSON",
+                url: '/mod',
+                data : reqData,
+                success: function(res){
+                    $('#tr_'+userId).remove();
+                    M.toast({html: "성공"});
+                    if(op){
+                        // $('#trList_'+userOid).clone().insertAfter('table[id^=modTable]:last');                    
+                        $('#trList_'+userOid).remove();
+                    }else{
+                        // $('#trMod_'+userOid).clone().insertAfter('table[id^=listTable]:last');                    
+                        $('#trMod_'+userOid).remove();
+                    }
+                    $http({
+                        method: 'GET',
+                        url: '/read/' + itemId
+                    }).then(function ifOK(res){
+                        $scope.readItem = res.data;
+                    }, function ifErr(res){
+                        console.error("err : ", res);
+                    });
+                },
+                error: function(req, status, err){
+                    M.toast({html: '오류, 로그 확인'});
+                    console.error('err', err);
+                }
+            });
+        }
+
+        $scope.btnModOnClass = function(){
+            M.Modal.getInstance($('#modStudent')).open();
+        }
+
+        $scope.btnItemUpdate = function(item){
+            M.Modal.getInstance($('#update')).open(); 
+            M.textareaAutoResize($('textarea'));
+            M.updateTextFields();
+
+            $('input, textarea').each(function(){this.focus();});
+
+            $('.chips-initial').chips({
+                data: item.tag
+            });
+            $('#update_status').prop('checked', item.status);
+        };
+
+        $scope.itemUpdate = function(item){
+            console.log(arrDays);
+            console.log(item._id);
+            console.log(item);
+            $('#update_days').val(arrDays);
+            console.log($('#update_days').val());
+            var data_tag = M.Chips.getInstance($('#update_tag')).chipsData;
+            var data_status = $('#update_status').prop('checked');
+            
+            var formData = new FormData($('#form_update')[0]);
+            formData.append('_id', item._id);
+            formData.append('tag', JSON.stringify(data_tag));
+            formData.append('status', data_status);
+
+            $.ajax({
+                type: "POST",
+                processData: false,
+                contentType: false,
+                dataType: "JSON",
+                enctype: 'multipart/form-data',
+                url: '/update',
+                data : formData,
+                success: function(res){
+                    // location.replace('/');
+                },
+                error: function(req, status, err){
+                    M.toast({html: '과목 수정 오류, 로그 확인'});
+                    console.error('err', err);
+                }
+            });
+        }
+
+        $scope.btnItemBuy = function(itemId){
+            var isOK = confirm("진짜 삽니다 ?");
+
+            if(isOK){
+                $http({
+                    method: 'GET',
+                    url: '/buy/' + itemId
+                }).then(function ifOK(res){
+                    if(res)
+                        location.replace('/');
+                    else
+                        M.toast({html: "구매 실패"});
+
+                }, function ifErr(res){
+                    console.error("err : ", res);
+                });
+            }    
+        }
+
+        $scope.itemBuy = function(itemId, confirm){
+            var reqData = {
+                oid : itemId,
+                confirm: confirm
+            };
+
+            $.ajax({
+                type: "POST",
+                dataType: "JSON",
+                url: '/buy',
+                data : reqData,
+                success: function(res){
+                    location.replace('/');
+                },
+                error: function(req, status, err){
+                    M.toast({html: '판매 처리 오류, 로그 확인'});
+                    console.error('err', err);
+                }
+            });
+        }
+
+        $scope.itemLike = function(itemId){
+            if(!is_logined)
+                M.TapTarget.getInstance($('.tap-target')).open();
+            else{
+                var a_tag = $('#lk_'+itemId);
+                var a_class = a_tag.attr('class');
+                var a_val = a_tag.attr('value');
+                var lc_tag = $('#lc_'+itemId);
+                
+                        
+                $http({
+                        method: 'GET',
+                        url: '/like/' + itemId + '/' + a_val
+                    }).then(function ifOK(res){
+                        if(res){
+                            $http({
+                                method: 'GET',
+                                url: '/getitem'
+                            }).then(function ifOK(response){
+                                $scope.items = response.data;
+                            }, function ifErr(response){
+                                console.error("err : ", response);
+                            });
+                            /*
+                            if(JSON.parse(a_val)){
+                                // is favor-ed
+                                a_tag.attr('class', a_class.replace('red', 'grey'));
+                                a_tag.attr('value', a_val.replace('true', 'false'));
+                                lc_tag.text(Number(lc_tag.text()) - 1);
+                            }else{
+                                // is not favor-ed
+                                a_tag.attr('class', a_class.replace('grey', 'red'));
+                                a_tag.attr('value', a_val.replace('false', 'true'));
+                                lc_tag.text(Number(lc_tag.text()) + 1);
+                            }
+                            */
+                        }
+                    }, function ifErr(res){
+                        console.error("err : ", res);
+                    });
+            }
+        }
+    
+        $scope.btnAdminMenu = function(){
+            if(is_admin){
+                $http({
+                    method: 'GET',
+                    url: '/getbeacon'
+                }).then(function ifOK(res){
+                    $scope.beacons = res.data;
+                }, function ifErr(res){
+                    console.error("err : ", res);
+                });
+
+                $http({
+                    method: 'GET',
+                    url: '/getuser'
+                }).then(function ifOK(res){
+                    $scope.users = res.data;
+                }, function ifErr(res){
+                    console.error("err : ", res);
+                });
+                M.Modal.getInstance($('#adminMenu')).open();
+
+            }
+        }
+        
+        $scope.addBeacon = function(){
+            var uuid = $('#beaconUUID').val();
+            var major = $('#beaconMajor').val();
+            var minor = $('#beaconMinor').val();
+            var reqData = {
+                uuid: uuid,
+                major: major,
+                minor: minor
+            };
+
+            $.ajax({
+                type: "POST",
+                dataType: "JSON",
+                url: '/addbeacon',
+                data : reqData,
+                success: function(res){
+                    $http({
+                        method: 'GET',
+                        url: '/getbeacon'
+                    }).then(function ifOK(tres){
+                        $scope.beacons = tres.data;
+                        M.toast({html: "비컨 추가 완료"});
+                    }, function ifErr(tres){
+                        console.error("err : ", tres);
+                    });
+                },
+                error: function(req, status, err){
+                    M.toast({html: '비컨 추가 오류, 로그 확인'});
+                    console.error('err', err);
+                }
+            });
+        }
+
+        $scope.itemReview = function(itemId){
+            var formData = new FormData($('#form_review')[0]);
+
+            var reqData = {
+                '_id': itemId,
+                'review_rate': formData.get('review_rate'),
+                'review_content': formData.get('review_content')
+            };
+
+            $.ajax({
+                type: "POST",
+                dataType: "JSON",
+                url: '/review',
+                data : reqData,
+                success: function(res){
+                    if(res){
+                        M.toast({html: "리뷰 작성 성공"});
+                        M.Modal.getInstance($('#read')).close();
+                    }
+                    else
+                        M.toast({html: "외않되"});
+                    // location.replace('/');
+                },
+                error: function(req, status, err){
+                    M.toast({html: '리뷰 작성 오류, 로그 확인'});
+                    console.error('err', err);
+                }
+            });
+        }
+    
+        $scope.btnAddBeaconOnClass = function(){
+            M.Modal.getInstance($('#addBeaconOnClass')).open();
+        }
+
+        $scope.addBeaconOnClass = function(beacon){
+            var oid = beacon._id;
+            var uuid = beacon.uuid;
+            var major = beacon.major;
+            var minor = beacon.minor;
+
+            console.log(oid, uuid, major, minor);
+
+            $('#writeBeaconID').val(oid);
+            $('#writeBeaconUUID').val(uuid);
+            $('#writeBeaconMajor').val(major);
+            $('#writeBeaconMinor').val(minor);
+            $('#writeUUID').val(uuid);
+            $('#writeMajor').val(major);
+            $('#writeMinor').val(minor);
+
+            $('#updateBeaconID').val(oid);
+            $('#updateBeaconUUID').val(uuid);
+            $('#updateBeaconMajor').val(major);
+            $('#updateBeaconMinor').val(minor);
+            $('#updateUUID').val(uuid);
+            $('#updateMajor').val(major);
+            $('#updateMinor').val(minor);
+            M.updateTextFields();
+            M.Modal.getInstance($('#addBeaconOnClass')).close();
+        }
+    });
+
+
+    itemcards.controller('TableController', ['$scope', 'NgTableParams', function ($scope, NgTableParams) {
+        var self = this;
+        pp = this;
+
+        var initialParams = {
+            count: 10,
+            sorting: { usernumber: "asc" }
+        };
+        var initialSettings = {
+            counts: [10, 25, 100],
+            paginationMaxBlocks: 12,
+            paginationMinBlocks: 5,
+            dataset: $scope.users
+        };
+
+        self.tableParams = new NgTableParams(initialParams, initialSettings);
+
+        $scope.$watch('users', function(newValue, oldValue, scope){
+            self.tableParams = new NgTableParams(initialParams, {dataset: $scope.users});
+            self.tableParams.reload();
+        });
+    }]);
+
+    itemcards.controller('TableControllerBeacon', ['$scope', 'NgTableParams', function ($scope, NgTableParams) {
+        var self = this;
+
+        var initialParams = {
+            count: 50,
+            sorting: { uuid: "asc" }
+        };
+        var initialSettings = {
+            counts: [],
+            paginationMaxBlocks: 12,
+            paginationMinBlocks: 5,
+            dataset: $scope.beacons
+        };
+
+        self.tableParams = new NgTableParams(initialParams, initialSettings);
+
+        $scope.$watch('beacons', function(newValue, oldValue, scope){
+            self.tableParams = new NgTableParams(initialParams, {dataset: $scope.beacons});
+            self.tableParams.reload();
+        });
+    }]);
+
+    itemcards.directive("setOnClick", function($compile){
+        return {
+            restrict: "A",
+            link: function(scope, elm, attrs, ctrl)
+            {
+            elm.attr("ng-click", "clickMe()");
+            elm.removeAttr("set-on-click")
+            $compile(elm)(scope);
+            }
+        };
+    });
+
+    itemcards.directive("repeatEnd", function(){
+        return {
+            restrict: "A",
+            link: function(scope, element, attrs){
+                if(scope.$last){
+                    scope.$eval(attrs.repeatEnd);
+                }
+            }
+        }
+    });
+
+    itemcards.directive("imgCheck", ['$http', function($http){
+        return {
+            link: function(scope, element, attrs){
+                $http.get('upload-images/'+attrs.imgCheck+'/pfp')
+                    .success(function(data, status){
+                        if(status==200 || status==304)
+                            attrs.$set('src', 'upload-images/'+attrs.imgCheck+'/pfp');
+                        else
+                            attrs.$set('src', 'images/account_circle.png');
+                    })
+                    .error(function(data, status){
+                        if(status==200 || status==304)
+                            attrs.$set('src', 'upload-images/'+attrs.imgCheck+'/pfp');
+                        else
+                            attrs.$set('src', 'images/account_circle.png');
+                    });
+            }
+        }
+    }]);
+
+    itemcards.filter('newlines', function(){
+        return function(text) {
+            return (text||'').split(/\r\n/g);
+        }
+    });
+
+    itemcards.filter('phoneExp', function(){
+        return function(number) {
+            var tmp = String(number);
+
+            // var hp = '0' + tmp.slice(0, 2) + '-' + tmp.slice(2, 6) + '-' + tmp.slice(6);
+            var hp = tmp.slice(0, 3) + '-' + tmp.slice(3, 7) + '-' + tmp.slice(7);
+
+            return hp;
+        }
+    });
+
+    itemcards.filter('imgPathExp', function(){
+        return function(path) {
+            if(path)
+                return path.substr(7);
+            else
+                return 'images/logo.png';
+        }
+    });
+
+    itemcards.filter("tabFilter", function($filter){
+        return function(items, scope) {
+            if(scope.tabFilterType){
+                var res = [];
+                angular.forEach(items, function(item){
+                    switch (scope.tabFilterType) {
+                        case 2:
+                            if(item.student.indexOf(logined_user)>-1)
+                                res.push(item);
+                            break;
+                        case 3:
+                            if(item.like_users.indexOf(logined_user) > -1)
+                                res.push(item);
+                            break;
+                        case 4:
+                            if(item.managerno == logined_user)
+                                res.push(item);
+                            break;
+                        case 5:
+                            if(item.student.indexOf(logined_user) > -1)
+                                res.push(item);
+                            break;
+                    }
+                });
+                return res;
+            }
+            else {
+                return items;
+            }
+        }
+    });
+
+    itemcards.filter("dateFilter", function($filter){
+        return function(date) {
+            var itemDateMin = $filter('date')(new Date(date), 'mm');
+            var nowDateMin = $filter('date')(Date.now(), 'mm');
+
+            var secDiff = parseInt((Date.now() - new Date(date))/1000);
+            var minDiff = parseInt(secDiff/60);
+            var hrDiff = parseInt(minDiff/60);
+            var dayDiff = parseInt(hrDiff/24);
+
+            if(dayDiff)
+                return dayDiff + " 일 전";
+            else if(hrDiff)
+                return hrDiff + " 시간 전";
+            else if(minDiff)
+                return minDiff + " 분 전";
+            else if(secDiff)
+                return secDiff + " 초 전";
+            else
+                return "방금 전";
+        }
+    });
+    
+    itemcards.filter('callMap', function(){
+        return function(loc, scope) {
+            var map = 'https://www.google.com/maps/embed/v1/place?key='+scope.api_key+"&q="+loc+"&region=KR&language=ko";
+
+            return map;
+        }
+    });
+
+    itemcards.filter('trusted', ['$sce', function ($sce) {
+        return $sce.trustAsResourceUrl;
+    }]);
+</script>
+<script>
+    function maxLengthCheck(obj){
+        console.log("length: "+ obj.value.length);
+        console.log("maxLen: " + obj.maxLength);
+
+        if(obj.value.length > obj.maxLength)
+            obj.value = obj.value.slice(0, obj.maxLength);
+    }
+
+
+    function ppap(itemId){
+        if(window.angFoo)   window.angFoo(itemId);
+    }
+    
+</script>
+
+<body onload="Initialize()">
+    
+<div class="container" ng-app="ItemCards" ng-controller="ItemCardsCtrl">
+
+    <div class="row">
+        <nav class="z-depth-3">
+            <div class="nav-wrapper">
+                <a href="#" class="brand-logo center"><img class="responsive-img" id="logo" src="images/logo.png"></a>
+    
+                    <div class="input-field ">
+                        <input id="search" type="search" placeholder="키워드 검색" required ng-model="searchFilter">
+                        <label class="label-icon" for="search"><i class="material-icons">search</i></label>
+                        <i class="material-icons" id="search_reset">close</i>
+                    </div>
+            </div>
+        </nav>
+        <div class="card-panel grey lighten-3 z-depth-3 hoverable">
+            <blockquote><h1>출결 관리</h1></blockquote>
+            
+            <!-- 필터 탭 -->
+            <div class="row">
+                <div class="col s12">
+                  <ul class="tabs">
+                    <li class="tab col s2">
+                        <a class="" href="" ng-click="tabFilterChange('')">전체 강의</a>
+                    </li>
+                    <li class="tab col s2">
+                        <a href="active" ng-click="tabFilterChange(2)">나의 수강목록</a>
+                    </li>
+                    <li class="tab col s2">
+                        <a href="" ng-click="tabFilterChange(3)">좋아요 누른 과목</a>
+                    </li>
+                    <li class="tab col s3">
+                        <a href="" ng-click="tabFilterChange(4)">내가 등록한 과목</a>
+                    </li>
+                    <li class="tab col s3">
+                        <a href="" ng-click="tabFilterChange(5)">보류</a>
+                    </li>
+                </ul>
+                <ul class="tabs">
+                    <li class="tab col s3">
+                        <a class="active" href="" ng-click="tabFilterChangeOrder('-regdate')">등록시간 순</a>
+                    </li>
+                    <li class="tab col s3">
+                        <a href="" ng-click="tabFilterChangeOrder('-hit')">조회수 순</a>
+                    </li>
+                    <li class="tab col s3">
+                        <a href="" ng-click="tabFilterChangeOrder('-like_count')">좋아요 순</a>
+                    </li>
+                    <li class="tab col s3">
+                        <div class="switch">
+                            <label>
+                              카드
+                              <input type="checkbox" checked ng-model="viewSwitch">
+                              <span class="lever"></span>
+                              시간표
+                            </label>
+                          </div>
+                        <!-- <a href="" ng-click="tabFilterChangeOrder('-price')">가격 순</a> -->
+                    </li>
+                  </ul>
+
+                </div>
+              </div>
+
+            <div class="row">
+                <!-- 카드 뷰 -->
+                <div ng-repeat="item in items | filter:searchFilter | tabFilter:this | orderBy: tabFilterOrderProp : tabFilterOrderType" class='{{ item.status ? "" : "opacity" }}' id="card_{{item._id}}" ng-show="!viewSwitch">
+                    <!-- <div ng-switch-when="on"> -->
+                        <div class="col s12 m6 l4 xl4">
+                            <a href="" class="black-text btn_read" ng-click="getItemData(item._id)">
+                            <div class="card hoverable z-depth-2 {{ item.buyer.name == logined_user ? 'green lighten-4' : '' }}">
+                                <div class="card-image" ng-switch="item.like_users.indexOf(logined_user)>-1?true:false">
+                                    <img ng-src="{{ item.image[0].path | imgPathExp }}" class="img_thumb {{(!is_logined)?'overlay_blur':''}}">
+                                    <a class="btn-floating halfway-fab waves-effect waves-light lighten-1 grey" id="lk_{{item._id}}" ng-switch-when="false" value="{{item.like_users.indexOf(logined_user)>-1?true:false}}" ng-click="itemLike(item._id)"><i class="material-icons">favorite</i></a>
+                                    <a class="btn-floating halfway-fab waves-effect waves-light lighten-1 red" id="lk_{{item._id}}" ng-switch-when="true" value="{{item.like_users.indexOf(logined_user)>-1?true:false}}" ng-click="itemLike(item._id)"><i class="material-icons">favorite</i></a>
+                                </div>
+                                <div class="card-title truncate item_title">
+                                    {{ item.title }}
+                                </div>
+                                <div class="card-content ">
+                                    <p class="truncate">{{ item.content }}</p>
+                                </div>
+                                <div class="card-action truncate">
+                                    <div class="chip" ng-repeat="tag in item.tag">
+                                        {{tag.tag}}
+                                    </div>
+                                </div>
+                                <div class="card-action">
+                                    <div class="row">
+                                        <div class="col s12 center">
+                                            <div class="chip teal lighten-5">
+                                                <img img-check="{{item.managerno}}">
+                                                {{item.manager}}
+                                            </div>
+                                        </div>
+                                        <div class="col s6">
+                                            <span class="valign-wrapper right right-align grey-text text-darken-2"><i class="material-icons">visibility</i>&nbsp;{{ item.hit }}</span>
+                                        </div>
+                                        <div class="col s6">
+                                            <span class="valign-wrapper center center-align grey-text text-darken-1">
+                                                <i class="material-icons">favorite</i>&nbsp;
+                                                <span id="lc_{{ item._id }}">{{ item.like_count }}</span>
+                                            </span>                                            
+                                        </div>
+                                        
+                                    </div>
+                                </div>
+
+                                <div class="card-action">
+                                    <div class="row">
+                                        <div class="col s12">
+                                            <h5 class="center green-text">{{ item.price | currency:"&#8361;&nbsp;":0 }} </h5>
+                                            
+                                            <div class="grey-text center">{{ item.regdate | dateFilter }} </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            </a>
+                        </div>
+                    <!-- </div> -->
+                </div>
+
+                <!-- 테이블 뷰 -->
+                <div class="card-panel hoverable" ng-show="viewSwitch">
+                    <table class="striped centered" id="timetable">
+                        <thead>
+                        <tr>
+                            <th></th>
+                            <th>월</th>
+                            <th>화</th>
+                            <th>수</th>
+                            <th>목</th>
+                            <th>금</th>
+                            <th>토</th>
+                        </tr>
+                        </thead>
+                
+                        <tbody>
+                        <tr>
+                            <td>1교시</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>2교시</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>3교시</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>4교시</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>5교시</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>6교시</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="fixed-action-btn ">
+        <a class="btn-floating btn-large red pulse" id="fab_menu">
+          <i class="large material-icons">menu</i>
+        </a>
+        <ul>
+          <li ng-if="is_admin"><a class="btn-floating orange btn clr" ng-click="btnAdminMenu()"><i class="material-icons">construction</i></a></li>
+          <li ng-if="is_admin"><a class="btn-floating green btn clr" id="fab_write"><i class="material-icons">edit</i></a></li>
+          <li><a class="btn-floating blue btn clr" id="fab_login"><i class="material-icons">person</i></a></li>
+        </ul>
+        <div class="tap-target" data-target="fab_login">
+            <div class="tap-target-content">
+                <h5>로그인을 먼저 해주세요 !</h5>
+                <p>사이트 이용을 위해서는 로그인이 필요합니다</p>
+            </div>
+        </div>
+    </div>
+
+      <div id="write" class="modal ">
+        <div class="modal-content z-depth-3 center">
+            <div class="container">
+                <form action="/write" method="post" id="form_write" enctype="multipart/form-data">
+                    <!-- <input name="username" id="username" type="hidden" value=<%= user %> > -->
+                    <!-- <input name="tag[]" id="tag" type="hidden"> -->
+                    <div class="row">
+                        <h1>수업 등록</h1>
+                        <div class="card-panel col s12">
+                            <div class="input-field col s12">
+                                <i class="material-icons prefix">format_quote</i>
+                                <input id="title" name="title" type="text" class="validate" required>
+                                <label for="title">과목명</label>
+                            </div>
+                            <div class="input-field col s12">
+                                <i class="material-icons prefix">subtitles</i>
+                                <textarea id="content" name="content" class="materialize-textarea validate" required></textarea>
+                                <label for="content">과목 개요</label>
+                            </div>
+
+
+                            <div class="input-field col s12">
+                                <i class="material-icons prefix">today</i>
+                                <input type="text" name="opening" id="opening" class="datepicker" required>
+                                <label for="opening">수업 개시일</label>
+                            </div>
+
+
+                            <div class="input-field col s12">
+                                <i class="material-icons ">schedule</i>
+                                <input id="days" name="days" type="hidden">
+
+                                <table class="striped centered timetable">
+                                    <thead>
+                                      <tr>
+                                          <th></th>
+                                          <th>월</th>
+                                          <th>화</th>
+                                          <th>수</th>
+                                          <th>목</th>
+                                          <th>금</th>
+                                          <th>토</th>
+                                      </tr>
+                                    </thead>
+                            
+                                    <tbody>
+                                      <tr>
+                                        <td>1교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>2교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>3교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>4교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>5교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>6교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                            </div>
+                                       
+                            <div class="input-field col s1 valign-wrapper">
+                                <i class="material-icons prefix">tag</i>
+                            </div>
+                            <div class="input-field col s11">
+                                <div class="chips chips-placeholder" id="upload_tag"></div>
+                            </div>
+
+                            <div ng-click="btnAddBeaconOnClass()">
+                                <input type="hidden" name="beaconID" id="writeBeaconID">
+                                <input type="hidden" name="beaconUUID" id="writeBeaconUUID">
+                                <input type="hidden" name="beaconMajor" id="writeBeaconMajor">
+                                <input type="hidden" name="beaconMinor" id="writeBeaconMinor">
+                                
+                                <div class="input-field col s12">
+                                    <i class="material-icons prefix">wifi</i>
+                                    <input id="writeUUID" name="aa" type="text" class="validate" required disabled>
+                                    <label for="aa">비컨 UUID</label>
+                                </div>
+                                <div class="input-field col s6">
+                                    <i class="material-icons prefix">wifi</i>
+                                    <input id="writeMajor" name="bb" type="text" class="validate" required disabled>
+                                    <label for="bb">비컨 Major</label>
+                                </div>
+                                <div class="input-field col s6">
+                                    <!-- <i class="material-icons prefix">wifi</i> -->
+                                    <input id="writeMinor" name="cc" type="text" class="validate" required disabled>
+                                    <label for="cc">비컨 Minor</label>
+                                </div>
+                            </div>
+
+                            <div class="input-field col s1 valign-wrapper">
+                                <i class="material-icons prefix">upload_file</i>
+                            </div>
+                            <div class="input-field file-field col s11">
+                                  <div class="file-path-wrapper">
+                                    <input type="file" id="upload_img" name="images[]" accept="image/*" multiple>
+                                    <input class="file-path validate" type="text" placeholder="하나 이상의 사진 첨부 (Optional)">
+                                  </div>
+                            </div>
+                            
+                            <div class="input-field col s6">
+                                <i class="material-icons prefix">location_on</i>
+                                <input id="location" name="location" type="text" class="validate" placeholder="강의실" required ng-value="logined_loc">
+                                <label for="location" ></label>
+                            </div>
+
+                            <div class="input-field col s6">
+                                <div class="switch">
+                                    <label>
+                                      종강
+                                      <input type="checkbox" checked id="upload_status">
+                                      <span class="lever"></span>
+                                      개강
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="col s12">
+                                <button class="btn-large waves-effect waves-light green" type="button" name="action" id="btn_write">등록
+                                    <i class="material-icons right">post_add</i>
+                                </button>
+                                <div class="progress">
+                                    <div class="indeterminate"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+      </div>
+
+      <div id="update" class="modal ">
+        <div class="modal-content z-depth-3 center">
+            <div class="container">
+                <form id="form_update">
+                    <div class="row">
+                        <h1>과목 수정</h1>
+                        <div class="card-panel col s12">
+                            <div class="input-field col s12">
+                                <i class="material-icons prefix">format_quote</i>
+                                <input  name="title" type="text" class="validate" required ng-model="readItem.title">
+                                <label for="title">과목명</label>
+                            </div>
+                            <div class="input-field col s12">
+                                <i class="material-icons prefix">subtitles</i>
+                                <textarea  name="content" class="materialize-textarea validate" required>{{readItem.content}}</textarea>
+                                <label for="content">과목 개요</label>
+                            </div>
+
+                            <div class="input-field col s12">
+                                <i class="material-icons prefix">today</i>
+                                <input type="text" name="opening" id="opening" class="datepicker" ng-model="readItem.opening" required>
+                                <label for="opening">수업 개시일</label>
+                            </div>
+                            
+                            <div class="input-field col s12">
+                                <i class="material-icons ">schedule</i>
+                                <input id="update_days" name="days" type="hidden">
+
+                                <table class="striped centered timetable">
+                                    <thead>
+                                      <tr>
+                                          <th></th>
+                                          <th>월</th>
+                                          <th>화</th>
+                                          <th>수</th>
+                                          <th>목</th>
+                                          <th>금</th>
+                                          <th>토</th>
+                                      </tr>
+                                    </thead>
+                            
+                                    <tbody>
+                                      <tr>
+                                        <td>1교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>2교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>3교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>4교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>5교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                      <tr>
+                                        <td>6교시</td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td></td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                            </div>
+
+                            <div class="input-field col s1 valign-wrapper">
+                                <i class="material-icons prefix">tag</i>
+                            </div>
+                            <div class="input-field col s11">
+                                <div class="chips chips-initial chips-placeholder" id="update_tag"></div>
+                            </div>
+
+                            <div ng-click="btnAddBeaconOnClass()">
+                                <input type="hidden" name="beaconID" id="updateBeaconID" ng-model="readItem.beacon.oid">
+                                <input type="hidden" name="beaconUUID" id="updateBeaconUUID" ng-model="readItem.beacon.uuid">
+                                <input type="hidden" name="beaconMajor" id="updateBeaconMajor" ng-model="readItem.beacon.major">
+                                <input type="hidden" name="beaconMinor" id="updateBeaconMinor" ng-model="readItem.beacon.minor">
+                                
+                                <div class="input-field col s12">
+                                    <i class="material-icons prefix">wifi</i>
+                                    <input id="updateUUID" name="aa" type="text" class="validate" required disabled ng-model="readItem.beacon.uuid">
+                                    <label for="aa">비컨 UUID</label>
+                                </div>
+                                <div class="input-field col s6">
+                                    <i class="material-icons prefix">wifi</i>
+                                    <input id="updateMajor" name="bb" type="text" class="validate" required disabled ng-model="readItem.beacon.major">
+                                    <label for="bb">비컨 Major</label>
+                                </div>
+                                <div class="input-field col s6">
+                                    <!-- <i class="material-icons prefix">wifi</i> -->
+                                    <input id="updateMinor" name="cc" type="text" class="validate" required disabled ng-model="readItem.beacon.minor">
+                                    <label for="cc">비컨 Minor</label>
+                                </div>
+                            </div>
+
+                            <div class="input-field col s1 valign-wrapper">
+                                <i class="material-icons prefix">upload_file</i>
+                            </div>
+                            <div class="input-field file-field col s11">
+                                  <div class="file-path-wrapper">
+                                    <input type="file" id="update_img" name="images[]" accept="image/*" multiple>
+                                    <input class="file-path validate" type="text" placeholder="하나 이상의 사진 첨부">
+                                  </div>
+                            </div>
+
+                            <div class="input-field col s6">
+                                <i class="material-icons prefix">location_on</i>
+                                <input id="location" name="location" type="text" class="validate" placeholder="강의실" required ng-model="readItem.location">
+                                <label for="location" ></label>
+                            </div>
+
+                            <div class="input-field col s6">
+                                <div class="switch">
+                                    <label>
+                                      종강
+                                      <input type="checkbox" checked id="upload_status">
+                                      <span class="lever"></span>
+                                      개강
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="col s12">
+                                <button class="btn-large waves-effect waves-light blue" type="button" ng-click="itemUpdate(readItem)">수정
+                                    <i class="material-icons right">edit</i>
+                                </button>
+                                <div class="progress">
+                                    <div class="indeterminate"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+      </div>
+
+      <div id="register" class="modal ">
+        <div class="modal-content z-depth-3 center">
+            <div class="container ">
+                <form id="form_register" name="form_register">
+                    <div class="row">
+                        <h1>사용자 등록</h1>
+                        <div class="card-panel col s12">
+
+                            <div class="input-field col s12">
+                                <i class="material-icons prefix">account_circle</i>
+                                <input id="register_name" name="register_name" type="text" class="" required>
+                                <label for="register_name">이름</label>
+                                <span class="helper-text" data-error="이름을 입력해주세요." data-success="굿"></span>
+                            </div>
+
+                            <div class="input-field col s6">
+                                <i class="material-icons prefix">badge</i>
+                                <input id="register_usernumber" name="register_usernumber" type="text" class="" required>
+                                <label for="register_usernumber">개인번호</label>
+                                <span class="helper-text" data-error="ex) 2016722080" data-success="굿"></span>
+                            </div>
+                            <div class="input-field col s6">
+                                <i class="material-icons prefix">key</i>
+                                <input id="register_password" name="register_password" type="password" class="validate" required>
+                                <label for="register_password">비밀번호</label>
+                                <span class="helper-text" data-error="비밀번호를 입력해주세요" data-success="굿"></span>
+                            </div>
+
+
+                            <div class="input-field col s6">
+                                <i class="material-icons prefix">school</i>
+                                <input id="register_department" name="register_department" type="text" class="" required>
+                                <label for="register_department">학과/학부</label>
+                                <span class="helper-text" data-error="ex) 컴퓨터정보공학부" data-success="굿"></span>
+                            </div>
+                            <div class="input-field col s6">
+                                <i class="material-icons prefix">phone_iphone</i>
+                                <input id="register_phone" name="register_phone" type="number" class="" maxlength="11" oninput="maxLengthCheck(this)" required>
+                                <label for="register_phone">연락처</label>
+                                <span class="helper-text" data-error="ex) 01012341234" data-success="굿"></span>
+                            </div>
+                            
+
+                            <div class="input-field col s1 valign-wrapper">
+                                <i class="material-icons prefix">upload_file</i>
+                            </div>
+                            <div class="input-field file-field col s11">
+                                  <div class="file-path-wrapper">
+                                    <input type="file" name="register_pfp" accept="image/*">
+                                    <input class="file-path validate" type="text" placeholder="본인 사진 첨부">
+                                  </div>
+                            </div>
+                            
+
+                            <div class="input-field col s12">
+                                <div class="card-panel z-depth-2">
+                                    <h3>RFID 태그를 단말기에 접촉하여 사용자 등록</h3>
+                                    <img src="/images/rfid.png">
+                                    <input id="register_rfid" name="register_rfid" type="hidden">
+                                    <input id="register_rfid_show" type="text" class="" disabled style="display: none;">
+                                    <div class="progress" id="register_progress">
+                                        <div class="indeterminate"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button class="btn-large waves-effect waves-light cyan disabled" type="button" id="btn_register_apply">
+                                등록
+                                <i class="material-icons right">send</i>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+      </div>
+
+      <div id="login" class="modal bottom-sheet">
+        <div class="modal-content z-depth-3 center">
+            <div class="container ">
+                <form method="post" id="form_login">
+                    <div class="row">
+                        <h1>{{is_logined ? '개인정보' : '로그인'}}</h1>
+                        <div class="card-panel col s12">
+
+                            <div class="col s12" ng-if="!is_logined">
+                                <div class="input-field col s12">
+                                    <i class="material-icons prefix">badge</i>
+                                    <input id="login_usernumber" name="login_usernumber" type="text" class="validate" required>
+                                    <label for="login_usernumber">개인번호</label>
+                                </div>
+                                <div class="input-field col s12" ng-if="!is_logined">
+                                    <i class="material-icons prefix">key</i>
+                                    <input id="login_password" name="login_password" type="password" class="validate" required>
+                                    <label for="login_password">비밀번호</label>
+                                </div>
+                                <div class="input-field col s12 card-panel z-depth-2">
+                                    <h5>또는 RFID 태그를 접촉하여 로그인</h5>
+                                    <img src="/images/rfid.png" style="width: 20%;">
+                                    <div class="progress" id="register_progress">
+                                        <div class="indeterminate"></div>
+                                    </div>
+                                </div>
+                                <div class="col s6">
+                                    <button class="btn-large waves-effect waves-light clr cyan" type="button" id="btn_register">사용자 등록
+                                        <i class="material-icons right">person_add</i>
+                                    </button>
+                                </div>
+                                <div class="col s6">
+                                    <button class="btn-large waves-effect waves-light " type="button" id="btn_login">로그인
+                                        <i class="material-icons right">login</i>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="col s12" ng-if="is_logined">
+                                <div class="input-field col s12">
+                                    <div class="chip adjust-text">
+                                        <img img-check="{{logined_user}}">
+                                        {{logined_name}}
+                                    </div>
+                                </div>
+
+                                <!-- <div class="col s12">
+                                    <iframe
+                                        height="200"
+                                        style="border:0"
+                                        allowfullscreen
+                                        src='{{logined_loc | callMap:this | trusted}}'>
+                                    </iframe>
+                                </div> -->
+                                <div class="col s12">
+                                    <button class="btn-large waves-effect waves-light clr grey" type="button" name="action" id="btn_logout">로그아웃
+                                        <i class="material-icons right">logout</i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+      </div>
+
+      <div id="read" class="modal">
+        <div class="modal-content z-depth-3 center" id="nomg">
+            <div class="carousel" id="item_carousel">
+                
+                <div ng-if="readItem.image == ''">
+                <a class="carousel-item valign-wrapper" ><img src="images/logo.png" ng-init="onEnd(false)"></a>
+                </div>
+
+                <div ng-if="readItem.image">
+                <a class="carousel-item valign-wrapper " ng-repeat="img in readItem.image" repeat-end="onEnd(true)">
+                    <img ng-src="{{ img.path.substr(7) }}">
+                </a>
+                </div>
+
+              </div>
+            <div class="container">
+                <div class="row">
+                    <div class="card-panel col s12">
+                        <div ng-repeat="item in items | filter:searchFilter" class='{{ item.status ? "" : "opacity" }}'></div>
+                        
+                        <blockquote class="left-align"><h3>{{readItem.title}}</h3></blockquote>
+
+                        <ul class="collapsible">
+                            <li class="active">
+                                <div class="collapsible-header deep-orange lighten-5">
+                                    <h5><i class="material-icons">article</i>과목 개요</h5>
+                                </div>
+                                <div class="collapsible-body left-align" >
+                                    <p ng-repeat="c in readItem.content | newlines track by $index">
+                                        {{ c=='' ? '&nbsp;' : c }}
+                                    </p>
+                                </div>
+                            </li>
+
+                            <li class="active">
+                                <div class="collapsible-header deep-orange lighten-5">
+                                    <h5><i class="material-icons">location_on</i>강의실</h5>
+                                </div>
+                                <div class="collapsible-body">
+                                    <h5>{{readItem.location}}</h5><BR>
+                                    <iframe
+                                        height="300"
+                                        style="border:0"
+                                        loading="lazy"
+                                        allowfullscreen
+                                        src='{{readItem.location | callMap:this | trusted}}'>
+                                    </iframe>
+                                </div>
+                            </li>
+
+                            <li class="active">
+                                <div class="collapsible-header deep-orange lighten-5">
+                                    <h5><i class="material-icons">tag</i>태그</h5>
+                                </div>
+                                <div class="collapsible-body">
+                                    <div class="chip adjust-text" ng-repeat="tag in readItem.tag">
+                                        {{tag.tag}}
+                                    </div>
+                                </div>
+                            </li>
+                            <li ng-show="readItem.status">
+                                <div class="collapsible-header deep-orange lighten-5">
+                                    <h5><i class="material-icons">phone_iphone</i>문의</h5>
+                                </div>
+                                <div class="collapsible-body center-align">
+                                    <div class="chip adjust-text teal lighten-5">
+                                        <img ng-src="upload-images/{{name}}/pfp" ng-repeat="name in readItem" repeat-end="onEnd(true)" ng-if="name == readItem.managerno">
+                                        {{readItem.manager}}
+                                    </div>
+                                    <div class="chip adjust-text  teal lighten-5">
+                                        <img src="images/phone.png">
+                                        {{readItem.phone | phoneExp }}
+                                    </div>
+                                    <!-- <h4 class="center-align">{{readItem.phone | phoneExp}}</h4> -->
+                                </div>
+                            </li>
+
+
+                            <li class="active" ng-show="is_admin">
+                                <div class="collapsible-header deep-orange lighten-5">
+                                    <h5><i class="material-icons">format_list_bulleted</i>수강생 목록</h5>
+                                </div>
+                                <div class="collapsible-body left-align">
+                                    <div ng-controller="TableController as vm">
+                                        <table ng-table="vm.tableParams" class="striped highlight responsive-table" show-filter="true" id="listTable">
+                                            <tr ng-repeat="user in $data" id="trList_{{user._id}}" class="{{user.admin?'green lighten-3':''}}" ng-if="readItem.student.indexOf(user.usernumber)>-1">
+                                                <td data-title="'개인번호'" filter="{ username: 'text'}", sortable="'usernumber'">
+                                                    {{user.usernumber}}</td>
+                                                <td data-title="'이름'" filter="{ name: 'text'}", sortable="'name'">
+                                                    <div class="chip adjust-text">
+                                                        <img img-check="{{user.usernumber}}">
+                                                        <span style="font-size: 0.7em;">{{user.name}}</span>
+                                                    </div>
+                                                </td>
+                                                <td data-title="'학과'" filter="{ department: 'text'}", sortable="'department'">
+                                                    {{user.department}}</td>
+                                                <td data-title="'연락처'" filter="{ phone: 'text'}" sortable="'phone'">
+                                                    {{user.phone | phoneExp}}</td>
+                                                <td data-title="'RFID TAG'">
+                                                    {{user.rfid}}
+                                                </td>
+                                                <td data-title="'삭제'">
+                                                    <button class="btn-flat" ng-click="userModOnClass(readItem._id, user._id, user.usernumber, true)"><i class="material-icons pink-text">delete</i></button>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                </div>
+                            </li>
+
+                            <li class="active" ng-show="readItem.buyer">
+                                <div class="collapsible-header deep-orange {{readItem.status ? 'lighten-3' : 'lighten-5'}}">
+                                    <h5><i class="material-icons">thumb_up</i>{{readItem.status ? '거래중..' : '판매완료'}}</h5>
+                                  </div>
+                                <div class="collapsible-body">
+                                    <div class="card" ng-show="readItem.review==null && !readItem.status && readItem.buyer.name==logined_user">
+                                        <form class="card-content row" id="form_review">
+                                            <div class="input-field col s12">
+                                                <i class="material-icons prefix">subtitles</i>
+                                                <textarea id="review_content" name="review_content" class="materialize-textarea validate" required></textarea>
+                                                <label for="review_content">후기를 작성해주세요</label>
+                                            </div>
+                                            <div class="input-field col s1">
+                                                <i class="material-icons left">star</i>
+                                            </div>
+                                            <div class="input-field col s11">
+                                                <input name="review_rate" type="range" min="0" max="5" step="0.1">
+                                            </div>
+                                            <button class="btn-large waves-effect waves-light brown" type="button" ng-click="itemReview(readItem._id)">상품 평가
+                                                <i class="material-icons right">rate_review</i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                    <div class="card" ng-show="readItem.review != null">
+                                        <div class="card-content row">
+                                            <span class="card-title"><i class="material-icons ">rate_review</i> 후기 한마디</span>
+                                            <h5>" <span class="green-text"> {{readItem.review.content}}</span> "</h5>
+                                        </div>
+                                        <div class="card-action">
+                                            <p><h5>평점 <span class="green-text">{{readItem.review.rate}}</span> / 5.0</h5></p>
+                                        </div>
+                                    </div>
+                                    <div ng-show="readItem.buyer.name == logined_user || readItem.username == logined_user || is_admin">
+                                        <div class="chip adjust-text">
+                                            <img ng-src="upload-images/{{name}}/pfp" ng-repeat="name in readItem.buyer" repeat-end="onEnd(true)" ng-if="name == readItem.buyer.name">
+                                            {{readItem.buyer.name}}
+                                        </div>
+                                        <div class="chip adjust-text">
+                                            <img src="images/phone.png">
+                                            {{readItem.buyer.phone | phoneExp }}
+                                        </div>
+                                    </div>
+                                    <div class="row" ng-show="readItem.username == logined_user && readItem.status">
+                                        <div class="col s6">
+                                            <button class="btn-large waves-effect waves-light deep-purple" type="button" ng-click="itemBuy(readItem._id, false)">저리가요
+                                                <i class="material-icons right">waving_hand</i>
+                                            </button>
+                                        </div>
+                                        <div class="col s6">
+                                            <button class="btn-large waves-effect waves-light green" type="button" ng-click="itemBuy(readItem._id, true)">거래완료
+                                                <i class="material-icons right">handshake</i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </li>
+                        </ul>
+                                    
+                        <div ng-if="readItem.managerno == logined_user">
+
+                            <div class="col s6">
+                                <button class="btn-large waves-effect waves-light red" type="button" ng-click="itemDelete(readItem._id)">삭제
+                                    <i class="material-icons right">delete</i>
+                                </button>
+                            </div>
+                            <div class="col s6">
+                                <button class="btn-large waves-effect waves-light blue " type="button" ng-click="btnItemUpdate(readItem)" ng-disabled="readItem.buyer">수정
+                                    <i class="material-icons right">edit</i>
+                                </button>
+                            </div>
+                            <button class="btn-large waves-effect waves-light green" type="button" ng-click="btnModOnClass(readItem._id)" ng-disabled="!readItem.status || readItem.buyer">수강생 추가
+                                <i class="material-icons right">person_add</i>
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+      </div>
+      
+    <div id="adminMenu" class="modal">
+        <div class="row">
+            <div class="col s12">
+              <ul class="tabs" id="adminTabs">
+                <li class="tab col s6"><a class="active" href="#tabUser"><h3>Member</h3></a></li>
+                <li class="tab col s6"><a href="#tabBeacon"><h3>Beacon</h3>></a></li>
+              </ul>
+            </div>
+            <div id="tabUser" class="col s12">
+                <h1>유저 관리</h1> 
+                <div class="card-panel grey lighten-5 z-depth-3 center" ng-if="is_admin">
+
+                    <div ng-controller="TableController as vm">
+                        <table ng-table="vm.tableParams" class="striped highlight responsive-table" show-filter="true">
+                            <tr ng-repeat="user in $data" id="tr_{{user._id}}" class="{{user.admin?'pink lighten-5':''}}">
+                                <td data-title="'개인번호'" filter="{ usernumber: 'text'}", sortable="'usernumber'">
+                                    {{user.usernumber}}</td>
+                                <td data-title="'이름'" filter="{ name: 'text'}", sortable="'name'">
+                                    {{user.name}}</td>
+                                <td data-title="'학과'" filter="{ department: 'text'}", sortable="'department'">
+                                    {{user.department}}</td>
+                                <td data-title="'연락처'" filter="{ phone: 'text'}" sortable="'phone'">
+                                    {{user.phone | phoneExp}}</td>
+                                <td data-title="'작업'">
+                                    <button class="btn-flat" ng-click="userDelete(user._id)" ng-disabled="user.admin"><i class="material-icons">delete</i></button>
+                                    <button class="btn-flat" ng-click="userGrant(user._id, true)" ng-if="!user.admin"><i class="material-icons">arrow_upward</i></button>
+                                    <button class="btn-flat" ng-click="userGrant(user._id, false)" ng-if="user.admin" ng-disabled="user.usernumber == logined_user"><i class="material-icons">arrow_downward</i></button>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div id="tabBeacon" class="col s12">
+                <h1>비컨 관리</h1>
+                <div class="card-panel grey lighten-5 z-depth-3 center" ng-if="is_admin">
+                    <div ng-controller="TableControllerBeacon as vm">
+                        <table ng-table="vm.tableParams" class="striped highlight responsive-table" show-filter="true">
+                            <tr ng-repeat="beacon in $data" id="tr_{{beacon._id}}" class="{{beacon.location?'grey lighten-3':''}}">
+                                <td data-title="'UUID'" filter="{ uuid: 'text'}", sortable="'uuid'">
+                                    {{beacon.uuid}}</td>
+                                <td data-title="'Major'" filter="{ major: 'text'}", sortable="'major'">
+                                    {{beacon.major}}</td>
+                                <td data-title="'Minor'" filter="{ minor: 'text'}", sortable="'minor'">
+                                    {{beacon.minor}}</td>
+                                <td data-title="'위치'" filter="{ location: 'text'}" sortable="'location'">
+                                    {{beacon.location}}</td>
+                                <td data-title="'삭제'">
+                                    <button class="btn-flat" ng-click="beaconDelete(beacon._id)" ><i class="material-icons">delete</i></button></td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="row">
+                        <div class="input-field col s12">
+                            <i class="material-icons prefix">wifi</i>
+                            <input id="beaconUUID" type="text" class="validate" required>
+                            <label for="beaconUUID">비컨 UUID</label>
+                        </div>
+                        <div class="input-field col s4">
+                            <i class="material-icons prefix">wifi</i>
+                            <input id="beaconMajor" type="text" class="validate" required>
+                            <label for="beaconMajor">비컨 Major</label>
+                        </div>
+                        <div class="input-field col s4">
+                            <i class="material-icons prefix">wifi</i>
+                            <input id="beaconMinor" type="text" class="validate" required>
+                            <label for="beaconMinor">비컨 Minor</label>
+                        </div>
+                        <div class="col s4">
+                            <a href="" class="waves-effect waves-light btn btn-large clr" ng-click="addBeacon()"><i class="material-icons right">add_circle</i>비컨 추가</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+          </div>
+    </div>
+     
+    <div id="modStudent" class="modal">
+        <div class="card-panel grey lighten-5 z-depth-3 center" ng-if="is_admin">
+            <div ng-controller="TableController as vm">
+                <table ng-table="vm.tableParams" class="striped highlight responsive-table" show-filter="true" id="modTable">
+                    <tr ng-repeat="user in $data" id="trMod_{{user._id}}"  ng-if="!user.admin && readItem.student.indexOf(user.usernumber)<0">
+                        <td data-title="'개인번호'" filter="{ usernumber: 'text'}", sortable="'usernumber'">
+                            {{user.usernumber}}</td>
+                        <td data-title="'이름'" filter="{ name: 'text'}", sortable="'name'">
+                            {{user.name}}</td>
+                        <td data-title="'학과'" filter="{ department: 'text'}", sortable="'department'">
+                            {{user.department}}</td>
+                        <td data-title="'연락처'" filter="{ phone: 'text'}" sortable="'phone'">
+                            {{user.phone | phoneExp}}</td>
+                        <td data-title="'추가'">
+                            <button class="btn-flat" ng-click="userModOnClass(readItem._id, user._id, user.usernumber, false)"><i class="material-icons blue-text">add_circle</i></button>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="addBeaconOnClass" class="modal">
+        <div class="card-panel grey lighten-5 z-depth-3 center" ng-if="is_admin">
+            <div ng-controller="TableControllerBeacon as vm">
+                <table ng-table="vm.tableParams" class="striped highlight responsive-table" show-filter="true">
+                    <tr ng-repeat="beacon in $data" id="tr_{{beacon._id}}">
+                        <td data-title="'UUID'" filter="{ uuid: 'text'}", sortable="'uuid'">
+                            {{beacon.uuid}}</td>
+                        <td data-title="'Major'" filter="{ major: 'text'}", sortable="'major'">
+                            {{beacon.major}}</td>
+                        <td data-title="'Minor'" filter="{ minor: 'text'}", sortable="'minor'">
+                            {{beacon.minor}}</td>
+                        <td data-title="'위치'" filter="{ location: 'text'}", sortable="'minor'">
+                            {{beacon.location}}</td>
+                        <td data-title="'지정'">
+                            <button class="btn-flat" ng-click="addBeaconOnClass(beacon)" ng-disabled="beacon.location"><i class="material-icons">add_circle</i></button></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div style="display: none;">
+	<table border="1" bgcolor="#e3e3e3" width="800">
+	<tr>
+		<td style='font:bold' width="33%">API Version</td>
+		<td width="67%"><div id="l_APIVersion">&nbsp;loading...</div></td>
+	</tr>
+	<tr>
+		<td colspan="2" style='font:bold;background:lightblue'>Desktop Reader Infomation (<a href="javascript:Initialize();">Refresh</a>)</td>
+	</tr>
+	<tr>
+		<td style='font:bold'><li>Reader Type</li></td>
+		<td><div id="l_ReaderType">&nbsp;loading...</div></td>
+	</tr>
+	<tr>
+		<td style='font:bold'><li>Firmware Version</li></td>
+		<td><div id="l_FirmwareVersion">&nbsp;loading...</div></td>
+	</tr>
+	<tr>
+		<td style='font:bold'><li>PSN(Product Serial Number)</li></td>
+		<td><div id="l_SerialNumber">&nbsp;loading...</div></td>
+	</tr>
+	<tr>
+		<td style='font:bold'><li>Connected Port</li></td>
+		<td><div id="l_Port">&nbsp;loading...</div></td>
+	</tr>
+	<tr>
+		<td style='font:bold'><li>Noise Value</li></td>
+		<td><div id="l_NoiseValue">&nbsp;loading...</div></td>
+	</tr>
+	</table>
+	</P>
+	<table border="1" bgcolor="#e3e3e3" width="800" height="250">
+	<tr>
+		<td width="23%">
+			<table border="0" cellpadding="0" cellspacing="0">
+			<tr>
+				<td><li>Tag List</li>&nbsp;(</td>
+				<td><div id="l_TagCount">0</div></td>
+				<td>)</td>
+			</tr>
+			</table>
+		</td>
+		<td rowspan="2" valign="top">
+			<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+			<tr>
+				<td valign="top">
+					<table border="1" cellpadding="2" cellspacing="1" width="100%">
+					<tr>
+						<td>
+							<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+							<tr>
+								<td align="center">
+									<input type="button" value="DetectAllUID" onclick="javascript:DetectAllUID();">&nbsp;&nbsp;
+									<input type="button" value="DetectAllUID w/DSFID" onclick="javascript:DetectAllUIDwDSFID();">&nbsp;&nbsp;
+									<input type="button" value="RFON" onclick="javascript:RFON();">&nbsp;&nbsp;
+									<input type="button" value="RFOFF" onclick="javascript:RFOFF();">
+								</td>
+							</tr>
+							</table>
+						</td>
+					</tr>
+					<tr>
+						<td id="l_EAS" disabled>
+							<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+							<tr>
+								<td align="center">
+									<input type="radio" name="EAS" value="Set">Set
+									<input type="radio" name="EAS" value="Reset">Reset
+									<input type="radio" name="EAS" value="Confirm" checked>Check&nbsp;&nbsp;
+									<input type="button" value="EAS" onclick="javascript:EAS();">
+								</td>
+							</tr>
+							</table>
+						</td>
+					</tr>
+					<tr id="l_AFI_DSFID" disabled>
+						<td>
+							<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+							<tr>
+								<td align="center">
+									<input type="button" value="GetSystemInformation" onclick="javascript:GetSystemInformation();">&nbsp;&nbsp;&nbsp;&nbsp;
+									0x<input type="text" id="t_DSFID" size="2" maxlength="2"><input type="button" value="WriteDSFID" onclick="javascript:WriteDSFID();">
+									0x<input type="text" id="t_AFI" size="2" maxlength="2"><input type="button" value="WriteAFI" onclick="javascript:WriteAFI();">
+								</td>
+							</tr>
+							</table>
+						</td>
+					</tr>
+					<tr>
+						<td id="l_MapType" disabled>
+							<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+							<tr>
+								<td>
+									<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+									<tr>
+										<td width="30%" align="center"><li>Tag MapType</li></td>
+										<td align="center">
+											<input type="radio" name="rdMapType" value="PublicLibrary" checked>PublicLibrary
+											<input type="radio" name="rdMapType" value="3M">3M
+											<input type="radio" name="rdMapType" value="3M(EPC)">3M(EPC)
+											<input type="radio" name="rdMapType" value="BUERY">BUERY
+										</td>
+									</tr>
+									</table>
+								</td>
+							</tr>
+							</table>
+						</td>
+					</tr>
+					<tr id="l_ReadWrite" disabled>
+						<td>
+							<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+							<tr>
+								<td>
+									<table border="1" width="100%">
+									<tr>
+										<td width="18%">LibraryCode</td>
+										<td width="13%"><input type="text" id="t_OwnerLibrary" size="6" maxlength="6"></td>
+										<td width="15%">RegCode</td>
+										<td>
+											<input type="text" id="t_RegCode" size="4" maxlength="4">
+											<input type="text" id="t_Serial" size="10" maxlength="10">
+										</td>
+										<td width="17%">ETC RegNo</td>
+										<td>
+											<input type="text" id="t_EtcRegNo" size="14" maxlength="14">
+										</td>
+									</tr>
+									<tr>
+										<td>Call Code</td>
+										<td colspan="3"><input type="text" id="t_CallCode" size="25" maxlength="25"></td>
+										<td width="17%">UserNumber</td>
+										<td>
+											<input type="text" id="t_UserNo" size="14" maxlength="14">
+										</td>
+									</tr>
+									<tr>
+										<td>Locaion</td>
+										<td><input type="text" id="t_LocCode" size="3" maxlength="3"></td>
+										<td>SeOrBo</td>
+										<td><input type="text" id="t_SeOrBo" size="1" maxlength="1"></td>
+										<td width="17%">UserName</td>
+										<td>
+											<input type="text" id="t_UserName" size="14" maxlength="14">
+										</td>
+									</tr>
+									<tr>
+										<td>Loan Status</td>
+										<td><input type="text" id="t_Loan" size="1" maxlength="1"></td>
+										<td colspan="2" align="center">
+											<input type="button" value="Read" onclick="javascript:ReadMultipleBlocksByUID();">&nbsp;&nbsp;&nbsp;
+											<input type="button" value="Book Write" onclick="javascript:WriteMultipleBlocksByUID();">
+										</td>
+										<td width="15%" colspan="2" align="center">
+											<input type="button" value="Read" onclick="javascript:ReadMultipleBlocksByUID();">&nbsp;&nbsp;&nbsp;
+											<input type="button" value="User Write" onclick="javascript:WriteMultipleBlocksByUID_User();">
+										</td>
+									</tr>
+									</table>
+								</td>
+							</tr>
+							</table>
+						</td>
+					</tr>
+					</table>
+				</td>
+			</tr>
+			</table>
+		</td>
+	</tr>
+	<tr>
+		<td align="center">
+			<select name="TagList" style="width:100%;font-family:����ü" size="14">
+			</select>
+		</td>
+	</tr>
+	</table>
+	<P/>
+	<table border="0" cellpadding="0" cellspacing="0" width="800">
+	<tr>
+		<td width="180"><li>Elapsed Milliseconds : </li></td>
+		<td width="33" align="right"><div id="l_ElapsedMilliseconds">0</div></td>
+		<td align="left">&nbsp;ms</td>
+	</tr>
+	<tr>
+		<td colspan="3">
+			<textarea id="l_TxData" style="width:100%;height:50" readonly></textarea>
+		</td>
+	</tr>
+	<tr>
+		<td colspan="3">
+			<textarea id="l_RxData" style="width:100%;height:50" readonly></textarea>
+		</td>
+	</tr>
+	</table>
+
+
+
+	<br>
+	<table border="1" bgcolor="#e3e3e3" width="800">
+	<tr>
+		<td style='font:bold' width="33%"><li>Reader Type</li></td>
+		<td><div id="l_ReaderType_SRR">&nbsp;loading...</div></td>
+	</tr>
+	<tr>
+		<td style='font:bold'><li>Firmware Version</li></td>
+		<td><div id="l_FirmwareVersion_SRR">&nbsp;loading...</div></td>
+	</tr>
+	<tr>
+		<td style='font:bold'><li>Connected Port</li></td>
+		<td><div id="l_Port_SRR">&nbsp;loading...</div></td>
+	</tr>
+	</table>
+
+	<table border="1" bgcolor="#e3e3e3" width="800">
+	<tr>
+		<td width="23%">
+			<table border="0" cellpadding="0" cellspacing="0">
+			<tr>
+				<td><li>Tag List</li>&nbsp;(</td>
+				<td><div id="l_TagCount_SRR">0</div></td>
+				<td>)</td>
+			</tr>
+			</table>
+		</td>
+		<td rowspan="2" valign="top">
+			<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+			<tr>
+				<td valign="top">
+					<table border="1" cellpadding="2" cellspacing="1" width="100%">
+					<tr>
+						<td>
+							<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+							<tr>
+								<td align="center">
+									<input type="button" value="DetectAllUIDwInventory" onclick="javascript:DetectAllUIDwInventory();">&nbsp;&nbsp;
+									<input type="button" value="Inventory" onclick="javascript:Inventory();">&nbsp;&nbsp;
+									<input type="button" value="GetUID/CSN" onclick="javascript:GetUIDCSN();">&nbsp;&nbsp;
+									<input type="button" value="RFON" onclick="javascript:RFON_SRR();">&nbsp;&nbsp;
+									<input type="button" value="RFOFF" onclick="javascript:RFOFF_SRR();">
+								</td>
+							</tr>
+							</table>
+						</td>
+					</tr>
+					<tr id="l_ReadWrite_SRR">
+						<td>
+							<table width="100%" height="100%" style="border-width:1px;border-spacing: ;border-style:outset;border-color:gray;border-collapse: collapse;background-color: transparent;">
+							<tr>
+								<td>
+									<table border="1" width="100%">
+									<td align="center">
+										<input type="button" value="Read" onclick="javascript:ReadMultiBlock();">&nbsp;&nbsp;&nbsp;
+										<input type="button" value="Write" onclick="javascript:WriteMultipleBlock();">
+									</td>
+									<tr>
+										<td width="25%">LibraryCode</td>
+										<td><input type="text" id="t_OwnerLibrary_SRR" size="6" maxlength="6"></td>
+										<td>UserNumber</td>
+										<td>
+											<input type="text" id="t_RegCode_SRR" size="14" maxlength="14">
+										</td>
+									</tr>
+									<tr>
+										<td>UserName</td>
+										<td colspan="3">
+											<input type="text" id="t_CallCode_SRR" size="25" maxlength="25">
+										</td>
+									</tr>
+									</table>
+								</td>
+							</tr>
+							</table>
+						</td>
+					</tr>
+					</table>
+				</td>
+			</tr>
+			</table>
+		</td>
+	</tr>
+	<tr>
+		<td align="center">
+			<select name="TagListSRR" style="width:100%;font-family:����ü" size="8">
+			</select>
+		</td>
+	</tr>
+	</table>
+</div>
+
+</body>
+
+<!--Import jQuery before materialize.js-->
+<script type="text/javascript" src="https://code.jquery.com/jquery-2.1.1.min.js" ></script>
+<script type="text/javascript" src="javascripts/materialize.min.js"></script>
+<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js" ></script> -->
+
+<script language="javascript">
+    var RFIDReaderProductsType = { ER100 : 0, ER200 : 1 };
+    var WebReaderMgr;		// Reader API
+    var ReaderInst;			// ER200 Reader Instance
+    var ReaderInstSRR;		// ER100 Reader Instance
+    var ServiceMethod = 'Ajax';
+    var BueryAPI;			// Buery API
+    
+    function Initialize()
+    {
+        try {	
+            if (ServiceMethod == 'Ajax')
+                WebReaderMgr = new ECOSmartIDReaderWebService.Manager();
+            else if(ServiceMethod == 'ActiveX'){
+                WebReaderMgr = new ActiveXObject("SmartID.Reader.WebService");
+                
+                //�����޸𸮸��� ����ϴ°��
+                BueryAPI = new ActiveXObject("HelperMapping.clsTable");
+            }
+    
+            document.getElementById("l_APIVersion").innerText = WebReaderMgr.Version;
+    
+            // DeskTop Reader(ER200) Check
+            if (WebReaderMgr.IsActive(RFIDReaderProductsType.ER200, 0)) {
+                ReaderInst = WebReaderMgr.GetReader(RFIDReaderProductsType.ER200, 0);
+                
+                // Ư���Ѱ�쿡���
+                //var Result = ReaderInst.SetProperty(ReaderInst.Command.AutoRFOff,"FALSE");
+                //if(!Result.IsSuccess)
+                //{
+                //	console.log("Fail!! SetProperty Response Code : " + Result.DataResponseResultMessage);
+                //	return;
+                //}
+                
+                if (ReaderInst.ReaderType == RFIDReaderProductsType.ER200) {
+                    document.getElementById("l_ReaderType").innerText = "ER200";
+                }
+                document.getElementById("l_FirmwareVersion").innerText = ReaderInst.FirmwareVersion;
+                document.getElementById("l_SerialNumber").innerText = ReaderInst.SerialNumber;
+                document.getElementById("l_Port").innerText = ReaderInst.ReaderInfo.Port;
+                document.getElementById("l_NoiseValue").innerText = ReaderInst.NoiseValue;
+    
+                ReaderInst.DisConnection();
+            }
+    
+            if (WebReaderMgr.IsActive(RFIDReaderProductsType.ER100, 0)) {
+                ReaderInstSRR = WebReaderMgr.GetReader(RFIDReaderProductsType.ER100, 0);
+    
+                if (ReaderInstSRR.ReaderType == RFIDReaderProductsType.ER100) {
+                    document.getElementById("l_ReaderType_SRR").innerText = "ER100";
+                }
+                document.getElementById("l_FirmwareVersion_SRR").innerText = ReaderInstSRR.FirmwareVersion;
+                document.getElementById("l_Port_SRR").innerText = ReaderInstSRR.ReaderInfo.Port;
+    
+                ReaderInstSRR.DisConnection();
+
+                setInterval(Inventory, 2000);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error : <font color='red'>" + e.message + "</font>");
+        }
+    }
+    
+    function DetectAllUID()
+    {
+        try {
+            var Result, TagCount;
+    
+            ClearTagList();
+    
+            Result = ReaderInst.CallTxRxCommand("DetectAllUID");
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                document.getElementById("l_EAS").disabled = false;
+                document.getElementById("l_AFI_DSFID").disabled = false;
+                document.getElementById("l_ReadWrite").disabled = false;
+                document.getElementById("l_MapType").disabled = false;
+    
+                TagCount = Result.Get("TAG_COUNT").ToByte();
+    
+                document.getElementById("l_TagCount").innerText = TagCount;
+                document.getElementById("l_ElapsedMilliseconds").innerText = Result.ElapsedMilliseconds;
+    
+                if (TagCount == 0) {
+                    document.getElementById("l_EAS").disabled = true;
+                    document.getElementById("l_AFI_DSFID").disabled = true;
+                    document.getElementById("l_ReadWrite").disabled = true;
+                    document.getElementById("l_MapType").disabled = true;
+                }
+                else {
+                    var TagInfo = Result.Get("TagInfo");
+                    for(var i = 0; i < TagCount; i++) {
+                        var UID = TagInfo.ToFieldObject("UID", i).ToHexString();
+    
+                        AddList(UID, UID);
+                    }
+                    document.all.TagList[0].selected = true;
+                }
+            }
+            else {
+                document.getElementById("l_EAS").disabled = true;
+                document.getElementById("l_AFI_DSFID").disabled = true;
+                document.getElementById("l_ReadWrite").disabled = true;
+                document.getElementById("l_MapType").disabled = true;
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function DetectAllUIDwDSFID()
+    {
+        try {
+            var Result, TagCount;
+    
+            ClearTagList();
+    
+            Result = ReaderInst.CallTxRxCommand("DetectAllUIDwDSFID");
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                document.getElementById("l_EAS").disabled = false;
+                document.getElementById("l_AFI_DSFID").disabled = false;
+                document.getElementById("l_ReadWrite").disabled = false;
+                document.getElementById("l_MapType").disabled = false;
+    
+                TagCount = Result.Get("TAG_COUNT").ToByte();
+    
+                document.getElementById("l_TagCount").innerText = TagCount;
+                document.getElementById("l_ElapsedMilliseconds").innerText = Result.ElapsedMilliseconds;
+    
+                if (TagCount == 0) {
+                    document.getElementById("l_EAS").disabled = true;
+                    document.getElementById("l_AFI_DSFID").disabled = true;
+                    document.getElementById("l_ReadWrite").disabled = true;
+                    document.getElementById("l_MapType").disabled = true;
+                }
+                else {
+                    var TagInfo = Result.Get("TagInfo");
+                    for(var i = 0; i < TagCount; i++) {	
+                        var UID = TagInfo.ToFieldObject("UID", i).ToHexString();
+                        var DSFID = TagInfo.ToFieldObject("DSFID", i).ToHexString();
+    
+                        AddList(UID + "(0x" + DSFID + ")", UID);
+                    }
+                    document.all.TagList[0].selected = true;
+                }
+            }
+            else {
+                document.getElementById("l_EAS").disabled = true;
+                document.getElementById("l_AFI_DSFID").disabled = true;
+                document.getElementById("l_ReadWrite").disabled = true;
+                document.getElementById("l_MapType").disabled = true;
+    
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function EAS()
+    {
+        try {
+            var Result, TagCount;
+            var TagList = document.all.TagList;
+    
+            if (TagList.selectedIndex >= 0) {
+                ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+            }
+            else {
+                console.log("Choose Tag from the list.");
+                return;
+            }
+            
+            if (document.all.EAS[0].checked) {
+                Result = ReaderInst.CallTxRxCommand("SetEAS"); // Set EAS
+            }
+            else if (document.all.EAS[1].checked) {
+                Result = ReaderInst.CallTxRxCommand("ResetEAS"); // Reset EAS
+            }
+            else {
+                Result = ReaderInst.CallTxRxCommand("EASAlarm"); // Check EAS
+            }
+    
+            TxRxFramePrint(Result);
+            
+            if (Result.IsSuccess) {
+                if (document.all.EAS[0].checked) {
+                    console.log("EAS Set Success"); // Set EAS
+                }
+                else if (document.all.EAS[1].checked) {
+                    console.log("EAS Reset Success"); // Reset EAS
+                }
+                else { // Check EAS
+                    if (Result.Get("EAS").ToByte() == 0xff) {
+                        console.log("EAS Status : Set");
+                    }
+                    else if (Result.Get("EAS").ToByte() == 0x00) {
+                        console.log("EAS Status : Reset");
+                    }
+                    else {
+                        console.log("EAS Status : Invalid");
+                    }
+                }
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function GetSystemInformation()
+    {
+        try {
+            var Result, TagCount;
+            var TagList = document.all.TagList;
+    
+            if (TagList.selectedIndex >= 0) {
+                ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);	
+            }
+            else {
+                console.log("Choose Tag from the list.");
+                return;
+            }
+    
+            Result = ReaderInst.CallTxRxCommand("GetSystemInformation");
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                document.getElementById("t_DSFID").value =  Result.Get("DSFID").ToHexString();
+                document.getElementById("t_AFI").value =  Result.Get("AFI").ToHexString();
+    
+                var TagType = "";
+                if (Result.Get("IC_REF").ToByte() == 0x01)	
+                    TagType = "(Philips)SLI";
+                else if (Result.Get("IC_REF").ToByte() == 0x80)
+                    TagType = "(TI)Tag-it HF-I";
+                else
+                    TagType = "Unknown";
+    
+                console.log(	"DSFID : " + Result.Get("DSFID").ToByte() + " (0x" + Result.Get("DSFID").ToHexString() + ")\r\n" +
+                        "AFI : " + Result.Get("AFI").ToByte() + " (0x" + Result.Get("AFI").ToHexString() + ")\r\n" +
+                        "BLOCK Count : " + Result.Get("BLOCK_CNT").ToByte() + 1 + "\r\n" +
+                        "BLOCK Size : " + Result.Get("BLOCK_SIZE").ToByte() + 1 + "\r\n" +
+                        "TYPE : " + TagType);
+            }
+            else {
+                if (Result.DataResponseResult == 0x90 && Result.Get("ISO_ERROR").ToByte() == 0x01)
+                    console.log("The command is not supported, i.e. The request code is not recognized.");
+                else
+                    console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function WriteDSFID()
+    {
+        try {
+            var TagList = document.all.TagList;
+            if (TagList.selectedIndex >= 0) {
+                ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+                
+                if (document.getElementById("t_DSFID").value == "") {
+                    console.log("DSFID value is null.");
+                    document.getElementById("t_DSFID").focus();
+                    return;
+                }
+    
+                ReaderInst.AddTxParameter("DSFID", document.getElementById("t_DSFID").value);
+            }
+            else {
+                console.log("Choose Tag from the list.");
+                return;
+            }
+    
+            Result = ReaderInst.CallTxRxCommand("WriteDSFID");
+    
+            TxRxFramePrint(Result);
+            
+            if (Result.IsSuccess) {
+                console.log("Write DSFID Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function WriteAFI()
+    {
+        try {
+            var TagList = document.all.TagList;
+            if (TagList.selectedIndex >= 0) {
+                ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+    
+                if (document.getElementById("t_AFI").value == "") {
+                    console.log("AFI value is null.");
+                    document.getElementById("t_AFI").focus();
+                    return;
+                }
+    
+                ReaderInst.AddTxParameter("AFI", document.getElementById("t_AFI").value);
+            }
+            else {
+                console.log("Choose Tag from the list.");
+                return;
+            }
+    
+            Result = ReaderInst.CallTxRxCommand("WriteAFI");
+    
+            TxRxFramePrint(Result);
+            
+            if (Result.IsSuccess) {
+                console.log("Write AFI Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function ReadMultipleBlocksByUID()
+    {
+        try {
+            var TagList = document.all.TagList;
+            if (TagList.selectedIndex >= 0) {
+                ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+                if (document.all.rdMapType[1].checked) {
+                    // ReaderInst.TagMap._3M
+                    ReaderInst.SetTxTagMap("urn:tag:map:201510.103");
+                }
+                else if (document.all.rdMapType[2].checked) {
+                    // _3M or _3M_EPC (first Check Map _3M)
+                    // ReaderInst.TagMap._3M
+                    ReaderInst.SetTxTagMap("urn:tag:map:201510.103");
+                }
+                else if (document.all.rdMapType[3].checked) {
+                    // BUERY
+                    // ReaderInst.TagMap.BUERY
+                    ReaderInst.SetTxTagMap("urn:tag:map:201710.101");
+                }
+                else {
+                    // ReaderInst.TagMap.PublicLibrary
+                    ReaderInst.SetTxTagMap("urn:tag:map:200301.101");
+                }
+            }
+            else {
+                console.log("Choose Tag from the list.");
+                return;
+            }
+    
+            Result = ReaderInst.CallTxRxCommand("ReadMultipleBlocksByUID");	// if my-d tag,  ReadMultiPageForMyD
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                var DB_DATA = Result.ParseUserData(Result.Get("DB_DATA"));
+    
+                if (document.all.rdMapType[0].checked) {
+                    if (null != DB_DATA.GetElement("TagType") && DB_DATA.GetElement("TagType")=="C8") {
+                        if (document.all.rdMapType[1].checked) {
+                            ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+                            // ReaderInst.TagMap.PublicLibrary
+                            ReaderInst.SetTxTagMap("urn:tag:map:200301.101");
+                            Result = ReaderInst.CallTxRxCommand("ReadMultipleBlocksByUID");
+    
+                            if (!Result.IsSuccess) {
+                                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+                                ReaderInst.DisConnection();
+                                return;
+                            }
+                            var DB_DATA = Result.ParseUserData(Result.Get("DB_DATA"));
+                        }
+    
+                        document.getElementById("t_OwnerLibrary").value = DB_DATA.GetElement("OwnerLibrary");
+    
+                        if(DB_DATA.ContainsElementName("CallCode")){
+                            if(null != DB_DATA.GetElement("CallCode") && DB_DATA.GetElement("CallCode") != "") {
+                                var ArrayCount = DB_DATA.GetElement("CallCode").split(':');
+                                
+                                document.getElementById("t_UserNo").value = ArrayCount[0]; // "UserNumber";
+                                document.getElementById("t_UserName").value = ArrayCount[1]; // "USerName";
+                            }
+                            else {
+                                document.getElementById("t_UserNo").value = ""; // "UserNumber";
+                                document.getElementById("t_UserName").value = ""; // "USerName";
+                            }
+                        }
+    
+                        ReaderInst.DisConnection();
+                        return;
+                    }
+                }
+    
+                if (document.all.rdMapType[1].checked) {
+                    // ������Ϲ�ȣ t_Serial
+                    document.getElementById("t_EtcRegNo").value = DB_DATA.GetElement("RegNo"); // "RegistrationNo"
+                }
+                else if (document.all.rdMapType[2].checked) {
+                    var MapVersion = DB_DATA.GetElement("MapVersion");
+                    if(MapVersion == "04") {
+                        // ������Ϲ�ȣ t_Serial
+                        document.getElementById("t_EtcRegNo").value = DB_DATA.GetElement("RegNo"); // "RegistrationNo"
+                    }
+                    else {
+                        ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+    
+                        // _3M or _3M_EPC (second Check Map _3M_EPC)
+                        // ReaderInst.TagMap._3M_EPC
+                        ReaderInst.SetTxTagMap("urn:tag:map:201605.101");
+                        Result = ReaderInst.CallTxRxCommand("ReadMultipleBlocksByUID"); // if my-d tag,  ReadMultiPageForMyD
+    
+                        TxRxFramePrint(Result);
+                        
+                        if (!Result.IsSuccess) {
+                            console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+                            ReaderInst.DisConnection();
+                            return;
+                        }
+    
+                        var DB_DATA = Result.ParseUserData(Result.Get("DB_DATA"));
+    
+                        // ������Ϲ�ȣ t_Serial
+                        document.getElementById("t_EtcRegNo").value = DB_DATA.GetElement("RegNo"); // "RegistrationNo"
+                    }
+                }
+                else if (document.all.rdMapType[3].checked) {
+                    // ������Ϲ�ȣ t_Serial
+                    if (ServiceMethod == 'Ajax')
+                        document.getElementById("t_EtcRegNo").value = DB_DATA.GetElement("RegNo"); // "RegNo"
+                    else{
+                        document.getElementById("t_EtcRegNo").value = BueryAPI.TagsysDecode(DB_DATA.GetElement("RegNo1") + DB_DATA.GetElement("RegNo2")); // "RegNo1" + "RegNo2"
+                    }
+                }
+                else {
+                    // ������Ϲ�ȣ t_RegCode + t_Serial
+                    document.getElementById("t_OwnerLibrary").value = DB_DATA.GetElement("OwnerLibrary"); // "OwnerLibrary"
+                    document.getElementById("t_RegCode").value = DB_DATA.GetElement("RegCode"); // "RegCode"
+                    document.getElementById("t_Serial").value = DB_DATA.GetElement("Serial"); // "Serial"
+                    document.getElementById("t_CallCode").value = DB_DATA.GetElement("CallCode"); // "CallCode"
+                    document.getElementById("t_LocCode").value = DB_DATA.GetElement("LocCode"); // "LocCode"
+                    document.getElementById("t_SeOrBo").value = DB_DATA.GetElement("SeOrBo"); // "SeOrBo"
+                    document.getElementById("t_Loan").value = DB_DATA.GetElement("Loan"); // "Loan"
+                }
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function WriteMultipleBlocksByUID()
+    {
+        try {
+            var TagList = document.all.TagList;
+            if (TagList.selectedIndex >= 0) {
+                ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+                if (document.all.rdMapType[1].checked) {
+                    // ReaderInst.TagMap._3M
+                    ReaderInst.SetTxTagMap("urn:tag:map:201510.103");
+    
+                    ReaderInst.SetMapElement("MapVersion", "04");
+                    ReaderInst.SetMapElement("SetInfo", "11");
+                    ReaderInst.SetMapElement("ItemType", "01");
+                    ReaderInst.SetMapElement("RegNo", document.getElementById("t_EtcRegNo").value);
+                    ReaderInst.SetMapElement("LibInfo", "");
+                }
+                else if (document.all.rdMapType[2].checked) {
+                    // ReaderInst.TagMap._3M_EPC
+                    ReaderInst.SetTxTagMap("urn:tag:map:201605.101");
+    
+                    ReaderInst.SetMapElement("MapVersion", "04");
+                    ReaderInst.SetMapElement("SetInfo", "11");
+                    ReaderInst.SetMapElement("ItemType", "01");
+                    ReaderInst.SetMapElement("RegNo", document.getElementById("t_EtcRegNo").value);
+                    ReaderInst.SetMapElement("LibInfo", "");
+                }
+                else if (document.all.rdMapType[3].checked) {
+                    // ReaderInst.TagMap.BUERY
+                    ReaderInst.SetTxTagMap("urn:tag:map:201710.101");
+    
+                    if (ServiceMethod == 'Ajax')
+                        ReaderInst.SetMapElement("RegNo", document.getElementById("t_EtcRegNo").value);
+                    else {
+                        var EncRegNo = BueryAPI.TagsysEncode(document.getElementById("t_EtcRegNo").value);
+                        ReaderInst.SetMapElement("RegNo1", EncRegNo.substring(0,8));
+                        ReaderInst.SetMapElement("RegNo2", EncRegNo.substring(8,16));
+                    }
+                }
+                else {
+                    // ReaderInst.TagMap.PublicLibrary
+                    ReaderInst.SetTxTagMap("urn:tag:map:200301.101");
+    
+                    ReaderInst.SetMapElement("OwnerLibrary", document.getElementById("t_OwnerLibrary").value);
+                    ReaderInst.SetMapElement("RegCode", document.getElementById("t_RegCode").value);
+                    ReaderInst.SetMapElement("Serial", document.getElementById("t_Serial").value);
+                    ReaderInst.SetMapElement("CallCode", document.getElementById("t_CallCode").value);
+                    ReaderInst.SetMapElement("LocCode", document.getElementById("t_LocCode").value);
+                    ReaderInst.SetMapElement("SeOrBo", document.getElementById("t_SeOrBo").value);
+                    ReaderInst.SetMapElement("Loan", document.getElementById("t_Loan").value);
+                }
+            }	
+            else {
+                console.log("Choose Tag from the list.");
+                return;
+            }
+    
+            Result = ReaderInst.CallTxRxCommand("WriteMultipleBlocksByUID"); // if my-d tag,  ReadMultiPageForMyD
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                console.log("Write Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function WriteMultipleBlocksByUID_User()
+    {
+        try {
+            var TagList = document.all.TagList;
+            if (TagList.selectedIndex >= 0) {
+                ReaderInst.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+                // ReaderInst.TagMap.PublicLibrary
+                ReaderInst.SetTxTagMap("urn:tag:map:200301.101");
+    
+                ReaderInst.SetMapElement("OwnerLibrary", document.getElementById("t_OwnerLibrary").value);
+                ReaderInst.SetMapElement("TagType", "C8");
+                ReaderInst.SetMapElement("CallCode", document.getElementById("t_UserNo").value + ":" + document.getElementById("t_UserName").value);
+            }
+            else
+            {
+                console.log("Choose Tag from the list.");
+                return;
+            }
+    
+            Result = ReaderInst.CallTxRxCommand("WriteMultipleBlocksByUID"); // if my-d tag,  ReadMultiPageForMyD
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                console.log("Write Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function RFON()
+    {
+        try {
+            var Result;
+            if (ServiceMethod == 'Ajax')
+                Result = ReaderInst.CallTxRxCommand(ReaderInst.Command.RFON);
+            else{
+                ReaderInst.AddTxParameter("ONOFF_Flag", "FF");
+                Result = ReaderInst.CallTxRxCommand("RFOnOff");
+            }
+    
+            TxRxFramePrint(Result);
+            
+            if (Result.IsSuccess) {
+                console.log("ER200 RFON Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function RFOFF()
+    {
+        try {
+            var Result;
+            if (ServiceMethod == 'Ajax')
+                Result = ReaderInst.CallTxRxCommand(ReaderInst.Command.RFOFF);
+            else {
+                ReaderInst.AddTxParameter("ONOFF_Flag", "00");
+                Result = ReaderInst.CallTxRxCommand("RFOnOff");
+            }
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                console.log("ER200 RFOFF Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInst.DisConnection();
+    }
+    
+    function DetectAllUIDwInventory()
+    {
+        try {
+            var Result, TagCount;
+    
+            ClearTagList();
+    
+            if (ServiceMethod == 'Ajax')
+                Result = ReaderInstSRR.CallTxRxCommand(ReaderInstSRR.Command.DetectAllUIDwInventory);
+            else
+                Result = ReaderInstSRR.CallTxRxCommand("DetectUIDwInventory");
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                TagCount = Result.Get("TAG_COUNT").ToByte();
+    
+                document.getElementById("l_TagCount_SRR").innerText = TagCount;
+                document.getElementById("l_ElapsedMilliseconds").innerText = Result.ElapsedMilliseconds;
+    
+                if (TagCount != 0) {
+                    var TagInfo = Result.Get("TagInfo");
+                    for(var i = 0; i < TagCount; i++) {
+                        var UID = TagInfo.ToFieldObject("UID", i).ToHexString();
+    
+                        AddListSRR(UID, UID);
+                    }
+                    document.all.TagListSRR[0].selected = true;
+                }
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInstSRR.DisConnection();
+    }
+    
+    function Inventory()
+    {
+        try {
+            var Result, TagCount;
+    
+            ClearTagList();
+    
+            Result = ReaderInstSRR.CallTxRxCommand("Inventory");
+    
+            TxRxFramePrint(Result);
+            
+            if (Result.IsSuccess) {
+                TagCount = 1;
+                document.getElementById("l_TagCount_SRR").innerText = TagCount;
+                document.getElementById("l_ElapsedMilliseconds").innerText = Result.ElapsedMilliseconds;
+                
+                var UID;
+                if (ServiceMethod == 'Ajax') {
+                    var TagInfo = Result.Get("TagInfo");
+                    UID = TagInfo.ToFieldObject("UID", 0).ToHexString();
+                }
+                else
+                    UID = Result.Get("UID").ToHexString();
+    
+                console.log("UID", UID);
+                window.setRFID(UID);
+
+
+                AddListSRR(UID, UID);
+                document.all.TagListSRR[0].selected = true;
+            }	
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInstSRR.DisConnection();
+    }
+    
+    function GetUIDCSN()
+    {
+        try {
+            var Result, TagCount;
+    
+            ClearTagList();
+    
+            if (ServiceMethod == 'Ajax')
+                Result = ReaderInstSRR.CallTxRxCommand(ReaderInstSRR.Command.GetUIDCSN);
+            else
+                Result = ReaderInstSRR.CallTxRxCommand("ISO14443_GetUIDCSN");
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                TagCount = 1;
+                document.getElementById("l_TagCount_SRR").innerText = TagCount;
+                document.getElementById("l_ElapsedMilliseconds").innerText = Result.ElapsedMilliseconds;
+    
+                var UID;
+                if (ServiceMethod == 'Ajax') {
+                    var TagInfo = Result.Get("TagInfo");
+                    UID = TagInfo.ToFieldObject("UID", 0).ToHexString();
+                }
+                else
+                    UID = Result.Get("UID").ToHexString();
+                
+                AddListSRR(UID, UID);
+                document.all.TagListSRR[0].selected = true;
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInstSRR.DisConnection();
+    }
+    
+    function RFON_SRR()
+    {
+        try {
+            var Result;	
+            if (ServiceMethod == 'Ajax')
+                Result = ReaderInstSRR.CallTxRxCommand(ReaderInstSRR.Command.RFON);
+            else {
+                ReaderInstSRR.AddTxParameter("ONOFF_Flag", "FF");
+                Result = ReaderInstSRR.CallTxRxCommand("RFOnOff");
+            }
+    
+            TxRxFramePrint(Result);
+            
+            if (Result.IsSuccess) {
+                console.log("ER100 RFON Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInstSRR.DisConnection();
+    }
+    
+    function RFOFF_SRR()
+    {
+        try {
+            var Result;
+            if (ServiceMethod == 'Ajax')
+                Result = ReaderInstSRR.CallTxRxCommand(ReaderInstSRR.Command.RFOFF);
+            else {
+                ReaderInstSRR.AddTxParameter("ONOFF_Flag", "00");
+                Result = ReaderInstSRR.CallTxRxCommand("RFOnOff");
+            }
+    
+            TxRxFramePrint(Result);
+            
+            if (Result.IsSuccess) {
+                console.log("ER100 RFOFF Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInstSRR.DisConnection();
+    }
+    
+    function ReadMultiBlock()
+    {
+        try {
+            var TagList = document.all.TagListSRR;	
+            ReaderInstSRR.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+            // ReaderInstSRR.TagMap.PublicLibrary
+            ReaderInstSRR.SetTxTagMap("urn:tag:map:200301.101");
+            
+            if (ServiceMethod == 'Ajax')
+                Result = ReaderInstSRR.CallTxRxCommand(ReaderInstSRR.Command.ReadMultiBlock); // if my-d tag,  ReadMultiPageForMyD
+            else
+                Result = ReaderInstSRR.CallTxRxCommand("ReadMultipleBlock"); // if my-d tag,  ReadMultiPageForMyD
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                var DB_DATA = Result.ParseUserData(Result.Get("DB_DATA"));
+    
+                document.getElementById("t_OwnerLibrary_SRR").value = DB_DATA.GetElement("OwnerLibrary"); // "OwnerLibrary"
+                if(DB_DATA.ContainsElementName("CallCode")) {
+                    if(null != DB_DATA.GetElement("CallCode") && DB_DATA.GetElement("CallCode") != "") {
+    
+                        var ArrayCount = DB_DATA.GetElement("CallCode").split(':');
+    
+                        document.getElementById("t_RegCode_SRR").value = ArrayCount[0]; // "UserNumber"
+                        document.getElementById("t_CallCode_SRR").value = ArrayCount[1]; // "USerName"
+                    }
+                    else {
+                        document.getElementById("t_RegCode_SRR").value = ""; // "UserNumber"
+                        document.getElementById("t_CallCode_SRR").value = ""; // "USerName"
+                    }
+                }
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInstSRR.DisConnection();
+    }
+    
+    function WriteMultipleBlock()
+    {
+        try {
+            var TagList = document.all.TagListSRR;
+            ReaderInstSRR.AddTxParameter("UID", TagList[TagList.selectedIndex].value);
+            // ReaderInstSRR.TagMap.PublicLibrary
+            ReaderInstSRR.SetTxTagMap("urn:tag:map:200301.101");
+    
+            ReaderInstSRR.SetMapElement("OwnerLibrary", document.getElementById("t_OwnerLibrary_SRR").value);
+            ReaderInstSRR.SetMapElement("TagType", "C8");
+            ReaderInstSRR.SetMapElement("CallCode", document.getElementById("t_RegCode_SRR").value + ":" + document.getElementById("t_CallCode_SRR").value);
+    
+            Result = ReaderInstSRR.CallTxRxCommand("WriteMultipleBlock"); // if my-d tag,  ReadMultiPageForMyD
+    
+            TxRxFramePrint(Result);
+    
+            if (Result.IsSuccess) {
+                console.log("Write Success!!");
+            }
+            else {
+                console.log("Commucation Status : " + Result.ReaderCommunicationResultMessage + ", Response Code : " + Result.DataResponseResultMessage);
+            }
+        }
+        catch (e) {
+            console.log("Fatal Error: " + e.message);
+        }
+        ReaderInstSRR.DisConnection();
+    }
+    
+    function ClearTagList()
+    {
+        var sTagList = document.all.TagList;
+    
+        for (var i=sTagList.length-1; i >= 0; i--) {
+            sTagList.remove(i);
+        }
+    
+        var sTagListSRR = document.all.TagListSRR;
+    
+        for (var i=sTagListSRR.length-1; i >= 0; i--) {
+            sTagListSRR.remove(i);
+        }
+    }
+    
+    function AddList(text, value)
+    {
+        var item = document.createElement("option");
+    
+        item.text = text;
+        item.value = value;
+    
+        document.all.TagList.add(item);
+    }
+    
+    function AddListSRR(text, value)
+    {
+        var item = document.createElement("option");
+    
+        item.text = text;
+        item.value = value;
+    
+        document.all.TagListSRR.add(item);
+    }
+    
+    function TxRxFramePrint(Result)
+    {
+        var TxData="", RxData="";
+        for (var i=0; i<Result.TxRxCount; i++) {
+            TxData = "Tx(" + (i+1) + ") : " + TxData + Result.GetTxData(i) + "\n";
+            RxData = "Rx(" + (i+1) + ") : " + RxData + Result.GetRxData(i) + "\n";
+        }
+    
+        document.getElementById("l_TxData").value = TxData;
+        document.getElementById("l_RxData").value = RxData;	
+    }
+</script>
+<script>
+    $(document).ready(function(){
+        $('.fixed-action-btn').floatingActionButton();
+        $('.tap-target').tapTarget();
+        $('.modal').modal();
+        $('.tabs').tabs();
+        $('textarea').characterCounter();
+        M.updateTextFields();
+        // M.AutoInit();
+
+        const regID = /^[a-zA-Z0-9가-힇_]{2,16}$/;
+        const regPH = /^\d{11}$/;
+        const regLO = /^[가-힇 ]{1,20}$/;
+
+        var val_id;
+        var val_ph;
+        var val_lo;
+
+        document.getElementById("register_usernumber").addEventListener("keyup", checkID);
+        document.getElementById("register_phone").addEventListener("keyup", checkPH);
+        document.getElementById("register_department").addEventListener("keyup", checkLO);
+        // document.getElementById("get_inventory").addEventListener("click", Inventory);
+
+        function checkPH() {
+            val_ph = document.getElementById("register_phone").value;
+
+            if(regPH.test(val_ph)) {
+                document.getElementById("register_phone").classList.remove("invalid");
+                document.getElementById("register_phone").classList.add("valid");
+            } else {
+                document.getElementById("register_phone").classList.remove("valid");
+                document.getElementById("register_phone").classList.add("invalid");
+            }
+
+            if(regID.test(val_id) && regPH.test(val_ph) && regLO.test(val_lo))
+                document.getElementById("btn_register_apply").classList.remove("disabled");
+            else  document.getElementById("btn_register_apply").classList.add("disabled");
+        }
+        function checkLO() {
+            val_lo = document.getElementById("register_department").value;
+
+            if(regLO.test(val_lo)) {
+                document.getElementById("register_department").classList.remove("invalid");
+                document.getElementById("register_department").classList.add("valid");
+            } else {
+                document.getElementById("register_department").classList.remove("valid");
+                document.getElementById("register_department").classList.add("invalid");
+            }
+
+            if(regID.test(val_id) && regPH.test(val_ph) && regLO.test(val_lo))
+                document.getElementById("btn_register_apply").classList.remove("disabled");
+            else  document.getElementById("btn_register_apply").classList.add("disabled");
+        }
+        function checkID() {
+            val_id = document.getElementById("register_usernumber").value;
+
+            if(regID.test(val_id)) {
+                document.getElementById("register_usernumber").classList.remove("invalid");
+                document.getElementById("register_usernumber").classList.add("valid");
+            } else {
+                document.getElementById("register_usernumber").classList.remove("valid");
+                document.getElementById("register_usernumber").classList.add("invalid");
+            }
+
+            if(regID.test(val_id) && regPH.test(val_ph) && regLO.test(val_lo))
+                document.getElementById("btn_register_apply").classList.remove("disabled");
+            else  document.getElementById("btn_register_apply").classList.add("disabled");
+        }
+
+        $('.clr').click(function(event){
+            $('form').each(function(){this.reset();});
+            $('#beaconUUID').val("");
+            $('#beaconMajor').val("");
+            $('#beaconMinor').val("");
+        })
+
+        $('.chips-placeholder').chips({
+            placeholder: '태그 추가',
+            secondaryPlaceholder: '+ 태그',            
+        });
+
+        $('.datepicker').datepicker({
+            autoClose: true,
+            format: 'yyyy.mm.dd',
+            showMonthAfterYear: true,
+            showDaysInNextAndPreviousMonths: true,
+            i18n: {
+                cancel: "취소",
+                done: "확인",
+                months: [
+                    '1월',
+                    '2월',
+                    '3월',
+                    '4월',
+                    '5월',
+                    '6월',
+                    '7월',
+                    '8월',
+                    '9월',
+                    '10월',
+                    '11월',
+                    '12월'
+                ],
+                monthsShort: [
+                    '1.',
+                    '2.',
+                    '3.',
+                    '4.',
+                    '5.',
+                    '6.',
+                    '7.',
+                    '8.',
+                    '9.',
+                    '10.',
+                    '11.',
+                    '12.'
+                ],
+                weekdays: [
+                    "일요일",
+                    "월요일",
+                    "화요일",
+                    "수요일",
+                    "목요일",
+                    "금요일",
+                    "토요일"
+                ],
+                weekdaysShort: [
+                    "일",
+                    '월',
+                    '화',
+                    '수',
+                    '목',
+                    '금',
+                    '토'
+                ],
+                weekdaysAbbrev: [
+                    "일",
+                    '월',
+                    '화',
+                    '수',
+                    '목',
+                    '금',
+                    '토'
+                ]
+            }
+        });
+
+        /*
+        $('.datepicker').datepicker({
+            disableWeekends: true,
+            isRTL: true
+        });
+        */
+
+        $('#adminTabs').tabs({
+            responsiveThreshold: 10
+        });
+
+
+        var idxChip = 0;
+        var arrChip = [null];
+        $('.timetable tr td').click(function(){
+            if($(this).attr('bgcolor')){
+                $(this).removeAttr('bgcolor');
+
+                var idx = $(this).attr('style');
+                var p = arrChip.indexOf(parseInt(idx));
+
+                arrChip.splice(p, 1);
+                $('#upload_tag').chips('deleteChip', p);
+                $('#update_tag').chips('deleteChip', p);
+                arrDays.splice(p-1, 1);
+            }
+            else{
+                $(this).attr('bgcolor', '#E57373');
+                $(this).attr('style', idxChip);
+
+                arrChip.push(idxChip);
+
+                idxChip++;
+
+                var dayList = ['월', '화', '수', '목', '금', '토'];
+                var day = ($(this).closest('td').index()) - 1; // 요일
+                var time = ($(this).closest('tr').index()) + 1; // 교시
+
+                var data = dayList[day] + time;
+
+                $('#upload_tag').chips('addChip', {tag: data});
+                $('#update_tag').chips('addChip', {tag: data});
+                arrDays.push(data);
+            }
+        });
+
+        $('#btn_write').click(function(event){
+            var data_tag = M.Chips.getInstance($('#upload_tag')).chipsData;
+            var data_status = $('#upload_status').prop('checked');
+            var days = $('#days').val(arrDays);
+                        
+            var formData = new FormData($('#form_write')[0]);
+            formData.append('tag', JSON.stringify(data_tag));
+            formData.append('status', data_status);
+
+            $.ajax({
+                type: "POST",
+                processData: false,
+                contentType: false,
+                dataType: "JSON",
+                enctype: 'multipart/form-data',
+                url: '/write',
+                data : formData,
+                success: function(res){
+                    location.replace('/');
+                },
+                error: function(req, status, err){
+                    M.toast({html: '강의 등록 오류, 로그 확인'});
+                    console.error('err', err);
+                }
+            });
+        });
+
+        $('#btn_register').click(function(event){
+            M.Modal.getInstance($('#register')).open();
+        });
+
+        $('#btn_register_apply').click(function(event){
+            var formData = new FormData($('#form_register')[0]);
+
+            $.ajax({
+                type: "POST",
+                processData: false,
+                contentType: false,
+                dataType: "JSON",
+                enctype: 'multipart/form-data',
+                url: '/register',
+                data : formData,
+                success: function(res){
+                    if(res){
+                        // register success
+                        M.toast({html: '사용자 등록 성공 !'});
+                        M.Modal.getInstance($('#register')).close();
+                    }else{
+                        // register fail
+                        M.toast({html: '이미 존재하는 개인번호입니다.'});
+                        $('#username').focus();
+                    }
+                },
+                error: function(req, status, err){
+                    M.toast({html: '사용자 등록 오류, 로그 확인'});
+                    console.error('err', err);
+                }
+            });
+        });
+
+        $('#btn_login').click(function(event){
+            var formData = $('#form_login').serialize();
+
+
+            $.post('/login', formData, function(res){
+                if(!res){
+                    // login fail
+                    M.toast({html: '개인번호 또는 비밀번호를 확인'});
+                    $('#username').focus();
+                }
+                else {
+                    location.replace('/');
+                }
+            }).fail(function(res){
+                M.toast({html: '로그인 오류, 로그 확인'});
+                console.error('err', res);
+            });
+        });
+
+        $('#btn_logout').click(function(event){
+            location.replace('/logout');
+        });
+
+        $('#fab_write').click(function(event){
+            if(<%= !is_logined %>)  {
+                M.TapTarget.getInstance($('.tap-target')).open();
+            } else {
+                idxChip = 0;
+                arrChip = [null];  
+                M.Modal.getInstance($('#write')).open();   
+
+                $('#upload_tag').chips('addChip', {tag: logined_name});
+
+            }
+        });
+
+        $('#fab_login').click(function(event){
+            M.Modal.getInstance($('#login')).open();
+        });
+
+        $('#search_reset').click(function(event){
+            $('#search').val("");
+        });
+  });
+</script>
+
+</html>
